@@ -4,6 +4,8 @@ A 3D open-world exploration game set in Myitkyina, Kachin State, built with Reac
 
 It runs in the browser on desktop and phones (landscape), and installs as a PWA.
 
+**Play:** https://myatdigital4-ctrl.github.io/myitkyina-3d/ (rebuilt automatically on every push to `main`)
+
 ## Run locally
 
 Requires Node.js 20+.

@@ -6,6 +6,8 @@ import {VitePWA} from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
   return {
+    // Served from a sub-path on GitHub Pages (BASE_PATH=/myitkyina-3d/), root elsewhere
+    base: process.env.BASE_PATH || '/',
     plugins: [
       react(),
       tailwindcss(),
@@ -13,7 +15,7 @@ export default defineConfig(() => {
         registerType: 'autoUpdate',
         includeAssets: ['icon.svg', 'apple-touch-icon.png'],
         manifest: {
-          id: '/',
+          id: './',
           name: 'Myitkyina: Emerald Confluence (မြစ်ကြီးနား Open World)',
           short_name: 'Myitkyina3D',
           description:
@@ -22,23 +24,23 @@ export default defineConfig(() => {
           background_color: '#080d0b',
           display: 'fullscreen',
           orientation: 'landscape',
-          start_url: '/',
-          scope: '/',
+          start_url: './',
+          scope: './',
           icons: [
             {
-              src: '/pwa-192x192.png',
+              src: 'pwa-192x192.png',
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-512x512.png',
+              src: 'pwa-512x512.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-maskable-512x512.png',
+              src: 'pwa-maskable-512x512.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',
