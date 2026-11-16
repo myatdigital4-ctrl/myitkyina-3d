@@ -24,6 +24,7 @@ import {
   GamePhase,
   HUDState,
   CITY_TOUR_STOP_IDS,
+  STATION_QUEST,
   INITIAL_QUESTS,
   InteractiveNpcInfo,
   ManauBeatKey,
@@ -413,6 +414,38 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
     // The hand-built fictional downtown is replaced by real OSM buildings at 1:1;
     // kept as an empty group so the existing visibility toggles still work.
     const downtownGroup = new THREE.Group();
+
+    // Station porter quest marker: a glowing suitcase on a ring at the current stop
+    const stationMarker = new THREE.Group();
+    {
+      const caseMat = new THREE.MeshStandardMaterial({
+        color: '#b45309',
+        emissive: '#f59e0b',
+        emissiveIntensity: 0.55,
+        roughness: 0.5,
+      });
+      const suitcase = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.65, 0.32), caseMat);
+      suitcase.position.y = 1.1;
+      stationMarker.add(suitcase);
+      const handle = new THREE.Mesh(
+        new THREE.TorusGeometry(0.16, 0.04, 8, 16, Math.PI),
+        new THREE.MeshStandardMaterial({ color: '#1e293b' }),
+      );
+      handle.position.y = 1.43;
+      stationMarker.add(handle);
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(2.6, 3.1, 40),
+        new THREE.MeshBasicMaterial({ color: '#fbbf24', transparent: true, opacity: 0.75, side: THREE.DoubleSide }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.12;
+      stationMarker.add(ring);
+    }
+    stationMarker.visible = false;
+    scene.add(stationMarker);
+    /** Seconds left to deliver the luggage once picked up (0 = not carrying) */
+    let stationTimer = 0;
+    let stationWarned = false;
 
     // Myitsone and Jaw Bum are far outside the 3 km map. The peace bell stays as an
     // inert object (rung already) so old save data keeps loading.
@@ -805,7 +838,7 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
     };
 
     // Fetch and convert the user's Myitkyina OpenStreetMap dataset (/assets/aistudio/export.geojson) into 3D
-    fetch('/assets/map/myitkyina-core.geojson')
+    fetch(`${import.meta.env.BASE_URL}assets/map/myitkyina-core.geojson`)
       .then((res) => (res.ok ? res.json() : null))
       .then((geojsonData) => {
         if (!geojsonData || isDisposed) return;
@@ -2015,6 +2048,16 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
     const onPageHide = () => persistGame();
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', onPageHide);
+
+    // Dev-only test hook (removed from production builds): window.__game.sim / .controller
+    if (import.meta.env.DEV) {
+      (window as unknown as { __game: unknown }).__game = {
+        sim,
+        get controller() {
+          return controllerRef.current;
+        },
+      };
+    }
 
     controllerRef.current = {
       startGame: () => {
@@ -3338,6 +3381,70 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
                 `အမြန်နှုန်းနှင့် အားအင် (Stamina 100%) တိုးမြင့်သွားပါပြီ! (${sim.comboCount}x Combo)`,
               );
             }
+          }
+
+          // Station porter quest: pick up luggage at the station, deliver it to the hotel in time
+          const qStation = sim.quests.find((q) => q.id === 'quest_station');
+          if (qStation && !qStation.completed) {
+            const carrying = qStation.progress >= 1;
+            const stop = carrying ? STATION_QUEST.dropoff : STATION_QUEST.pickup;
+            qStation.targetRegion = carrying ? 'downtown_market' : 'railway_station';
+            qStation.targetX = stop.x;
+            qStation.targetZ = stop.z;
+            stationMarker.visible = true;
+            stationMarker.position.set(stop.x, groundHeightAt(stop.x, stop.z), stop.z);
+            stationMarker.children[0].rotation.y += dt * 1.6;
+            stationMarker.children[0].position.y = 1.1 + Math.sin(elapsed * 3) * 0.12;
+
+            // A loaded save may resume mid-delivery: give a fresh timer
+            if (carrying && stationTimer <= 0) stationTimer = STATION_QUEST.timeLimitSec;
+
+            if (carrying) {
+              stationTimer -= dt;
+              if (!stationWarned && stationTimer < 30) {
+                stationWarned = true;
+                showBanner('⏱ ခရီးဆောင်အိတ် ပို့ရန် စက္ကန့် ၃၀ သာ ကျန်ပါပြီ!', `${STATION_QUEST.hotelNameMm} သို့ အမြန်သွားပါ`);
+              }
+              if (stationTimer <= 0) {
+                qStation.progress = 0;
+                stationTimer = 0;
+                stationWarned = false;
+                soundEngine.playSplash(false);
+                showBanner(
+                  '⌛ အချိန်ကုန်သွားပါပြီ — ခရီးသည်က အိတ်ကို ပြန်ယူသွားပါပြီ',
+                  'မီးရထားဘူတာသို့ ပြန်သွားပြီး ထပ်ကြိုးစားပါ',
+                );
+              }
+            }
+
+            if (Math.hypot(stop.x - sim.playerX, stop.z - sim.playerZ) < 4.5) {
+              if (!carrying) {
+                qStation.progress = 1;
+                stationTimer = STATION_QUEST.timeLimitSec;
+                stationWarned = false;
+                soundEngine.playJadeCollect(2);
+                spawnBurst(stop.x, sim.playerY + 1.6, stop.z, '#f59e0b', 16);
+                showBanner(
+                  '🧳 ခရီးဆောင်အိတ် ယူပြီးပါပြီ!',
+                  `${STATION_QUEST.hotelNameMm} သို့ စက္ကန့် ${STATION_QUEST.timeLimitSec} အတွင်း ပို့ပါ (GPS လမ်းညွှန်အတိုင်း)`,
+                );
+              } else {
+                qStation.progress = qStation.goal;
+                qStation.completed = true;
+                stationTimer = 0;
+                stationMarker.visible = false;
+                sim.jadeCount += qStation.rewardJade;
+                sim.score += 700;
+                soundEngine.playQuestComplete();
+                spawnBurst(stop.x, sim.playerY + 1.8, stop.z, '#10b981', 22);
+                showBanner(
+                  `🏆 ဘူတာရုံ ပစ္စည်းထမ်း မစ်ရှင် အောင်မြင်ပြီ! +${qStation.rewardJade.toLocaleString()} MMK`,
+                  'ခရီးသည်က ကျေးဇူးတင်ပါတယ်တဲ့ — Station Porter Complete!',
+                );
+              }
+            }
+          } else {
+            stationMarker.visible = false;
           }
 
           // City Tour quest: visit landmarks in order (target follows the next stop)

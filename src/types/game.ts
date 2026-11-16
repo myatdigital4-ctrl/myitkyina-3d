@@ -1271,6 +1271,20 @@ export const INITIAL_QUESTS: QuestObjective[] = [
     completed: false,
   },
   {
+    id: 'quest_station',
+    titleMm: 'ဘူတာရုံ ခရီးသည် ပစ္စည်းထမ်း — ရထားခရီးသည်၏ ခရီးဆောင်အိတ်ကို ဟိုတယ်သို့ ပို့ပါ',
+    titleEn: 'Station Porter: Carry a Passenger’s Luggage to the Hotel',
+    descriptionMm:
+      'မန္တလေးမှ ရထားဆိုက်ပြီ! မြစ်ကြီးနား မီးရထားဘူတာ ရှေ့တွင် ခရီးဆောင်အိတ်ကို ယူပြီး Hotel Myitkyina သို့ အချိန်မီ ပို့ဆောင်ပေးပါ',
+    targetRegion: 'railway_station',
+    targetX: 0,
+    targetZ: 0,
+    progress: 0,
+    goal: 2,
+    rewardJade: 40000,
+    completed: false,
+  },
+  {
     id: 'quest_manau_rhythm',
     titleMm: 'မနောကွင်းတွင် ရိုးရာမနောအက သံစဉ်ချက် (၈) ချက် မှန်အောင်ကပါ',
     titleEn: 'Complete the Manau Rhythm Dance Performance (8 Beats)',
@@ -1365,6 +1379,17 @@ export const INITIAL_QUESTS: QuestObjective[] = [
     completed: false,
   },
 ];
+
+/** quest_station: pick the luggage up in front of the station, drop it at the hotel door. */
+const STATION_HOTEL =
+  MYITKYINA_FAMOUS_BUILDINGS.find((b) => b.id === 'bldg_hotel_myitkyina') ?? MAP_PLACES.downtown;
+export const STATION_QUEST = {
+  pickup: roadsidePoint(MAP_PLACES.railwayStation.x, MAP_PLACES.railwayStation.z, 2),
+  dropoff: roadsidePoint(STATION_HOTEL.x, STATION_HOTEL.z, 2),
+  hotelNameMm: 'Hotel Myitkyina',
+  /** Seconds allowed from pickup to delivery */
+  timeLimitSec: 200,
+};
 
 /** Ordered stops for quest_explorer; progress N means stop N is next. */
 export const CITY_TOUR_STOP_IDS: RegionId[] = [
