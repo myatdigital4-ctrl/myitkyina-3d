@@ -1,0 +1,20 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Build / dev output
+dev-dist/
+
+# Raw downloaded datasets (see README "Map" section to re-download)
+data/
+
+# Tool caches and local backups
+.aistudio/
+.gmp_cache/
+.backup-before-save/
+.claude/

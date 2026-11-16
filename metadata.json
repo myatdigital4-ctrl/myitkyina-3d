@@ -1,0 +1,6 @@
+{
+  "name": "Myitkyina: Emerald Confluence (မြစ်ကြီးနား Open World)",
+  "description": "3D Open World action-exploration game set in Myitkyina, Kachin State — explore Manau Park, Balaminhtin Bridge, the Ayeyarwady River, and Myitsone Confluence on foot, by 4x4 vehicle, or riverboat.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
