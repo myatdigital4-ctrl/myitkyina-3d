@@ -273,6 +273,166 @@ function createRoadRibbonGeometry(
   return geo;
 }
 
+/** Polyline shifted sideways by `d` meters (positive = right of travel direction). */
+function offsetPolyline(pts: { x: number; z: number }[], d: number): { x: number; z: number }[] {
+  return pts.map((p, i) => {
+    const a = pts[Math.max(0, i - 1)];
+    const b = pts[Math.min(pts.length - 1, i + 1)];
+    const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    // right-hand normal of (dx, dz) is (-dz, dx)
+    return { x: p.x + (-(b.z - a.z) / len) * d, z: p.z + ((b.x - a.x) / len) * d };
+  });
+}
+
+/** Common Myitkyina street-shop signs, painted into one 4×4 atlas (one draw call for all signs). */
+const SHOP_SIGNS: { text: string; bg: string; fg: string }[] = [
+  { text: 'လက်ဖက်ရည်ဆိုင်', bg: '#b91c1c', fg: '#fef3c7' },
+  { text: 'ကုန်စုံဆိုင်', bg: '#1d4ed8', fg: '#ffffff' },
+  { text: 'ဖုန်းဆိုင်', bg: '#0f766e', fg: '#ffffff' },
+  { text: 'ဆေးဆိုင်', bg: '#15803d', fg: '#ffffff' },
+  { text: 'ထမင်းဆိုင်', bg: '#c2410c', fg: '#fff7ed' },
+  { text: 'ရွှေဆိုင်', bg: '#a16207', fg: '#fef9c3' },
+  { text: 'အလှပြင်ဆိုင်', bg: '#be185d', fg: '#fdf2f8' },
+  { text: 'စာအုပ်ဆိုင်', bg: '#334155', fg: '#f8fafc' },
+  { text: 'ဆိုင်ကယ်ပြင်', bg: '#1e293b', fg: '#facc15' },
+  { text: 'ကော်ဖီဆိုင်', bg: '#78350f', fg: '#fef3c7' },
+  { text: 'မုန့်ဟင်းခါး', bg: '#9a3412', fg: '#ffedd5' },
+  { text: 'အထည်ဆိုင်', bg: '#6d28d9', fg: '#f5f3ff' },
+  { text: 'ကချင်ရိုးရာ', bg: '#7f1d1d', fg: '#fde68a' },
+  { text: 'ငွေလွှဲ', bg: '#0369a1', fg: '#ffffff' },
+  { text: 'ဟာ့ဒ်ဝဲ', bg: '#57534e', fg: '#fafaf9' },
+  { text: 'ဘေကရီ', bg: '#db2777', fg: '#ffffff' },
+];
+function createShopSignAtlas(): THREE.CanvasTexture {
+  const cw = 256;
+  const ch = 72;
+  const c = document.createElement('canvas');
+  c.width = cw * 4;
+  c.height = ch * 4;
+  const g = c.getContext('2d')!;
+  SHOP_SIGNS.forEach((sgn, i) => {
+    const x = (i % 4) * cw;
+    const y = Math.floor(i / 4) * ch;
+    g.fillStyle = sgn.bg;
+    g.fillRect(x, y, cw, ch);
+    g.strokeStyle = 'rgba(255,255,255,0.55)';
+    g.lineWidth = 4;
+    g.strokeRect(x + 4, y + 4, cw - 8, ch - 8);
+    g.fillStyle = sgn.fg;
+    g.font = 'bold 30px "Noto Sans Myanmar", "Myanmar Sangam MN", "Padauk", sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(sgn.text, x + cw / 2, y + ch / 2 + 2, cw - 20);
+  });
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+/** Smallest-area rectangle around a polygon (local x/y), tested along each edge direction. */
+function orientedBox(pts: { x: number; y: number }[]) {
+  let best = { area: Infinity, angle: 0, cu: 0, cv: 0, L: 0, D: 0 };
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    const ang = Math.atan2(b.y - a.y, b.x - a.x);
+    const c = Math.cos(ang);
+    const s = Math.sin(ang);
+    let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+    for (const p of pts) {
+      const u = p.x * c + p.y * s;
+      const v = -p.x * s + p.y * c;
+      u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v);
+    }
+    const area = (u1 - u0) * (v1 - v0);
+    if (area < best.area) {
+      best = { area, angle: ang, cu: (u0 + u1) / 2, cv: (v0 + v1) / 2, L: u1 - u0, D: v1 - v0 };
+    }
+  }
+  // Keep L as the long side
+  if (best.D > best.L) {
+    best = { ...best, angle: best.angle + Math.PI / 2, cu: best.cv, cv: -best.cu, L: best.D, D: best.L };
+  }
+  return best;
+}
+
+/**
+ * Pitched zinc roof (hip or gable) over an oriented rectangle, the common Myitkyina house roof.
+ * Local frame: u along the long side, v across. Returns world-space, non-indexed geometry.
+ */
+function buildPitchedRoof(
+  box: ReturnType<typeof orientedBox>,
+  cx: number,
+  cz: number,
+  y0: number,
+  hip: boolean,
+): THREE.BufferGeometry {
+  const o = 0.45; // eave overhang
+  const hu = box.L / 2 + o;
+  const hv = box.D / 2 + o;
+  const rise = Math.min(3.2, Math.max(1.0, box.D * 0.32));
+  const ridgeHalf = hip ? Math.max(0, box.L / 2 - box.D / 2) : hu;
+  const c = Math.cos(box.angle);
+  const s = Math.sin(box.angle);
+  // local (u, v, h) -> world (x, y, z); local y axis of the footprint points to -z
+  const w = (u: number, v: number, h: number) => {
+    const lx = box.cu * c - box.cv * s + u * c - v * s;
+    const ly = box.cu * s + box.cv * c + u * s + v * c;
+    return [cx + lx, y0 + h, cz - ly];
+  };
+  const A = w(-hu, -hv, 0), B = w(hu, -hv, 0), C = w(hu, hv, 0), D = w(-hu, hv, 0);
+  const R1 = w(-ridgeHalf, 0, rise), R2 = w(ridgeHalf, 0, rise);
+  const tris: number[][] = [
+    // long slopes
+    A, B, R2, A, R2, R1,
+    C, D, R1, C, R1, R2,
+    // ends (hip slopes or vertical gable triangles)
+    B, C, R2,
+    D, A, R1,
+  ];
+  const pos = new Float32Array(tris.length * 3);
+  tris.forEach((p, i) => pos.set(p, i * 3));
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(tris.length * 2), 2));
+  g.computeVertexNormals();
+  return g;
+}
+
+/** Plastered wall with a window per ~3 m and per storey (tinted by the wall material color). */
+function createWindowWallTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 128;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, 128, 128);
+  // Floor band
+  g.fillStyle = '#d6d3d1';
+  g.fillRect(0, 118, 128, 10);
+  // Window: frame, glass, mullion
+  g.fillStyle = '#e7e5e4';
+  g.fillRect(34, 30, 60, 58);
+  g.fillStyle = '#3b4f5c';
+  g.fillRect(39, 35, 50, 48);
+  g.fillStyle = '#5b7282';
+  g.fillRect(39, 35, 50, 14);
+  g.fillStyle = '#e7e5e4';
+  g.fillRect(62, 35, 4, 48);
+  // Sill
+  g.fillStyle = '#a8a29e';
+  g.fillRect(30, 88, 68, 5);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  // UVs of extruded walls are in meters: one tile = 3 m wide x 3.2 m (one storey) tall
+  tex.repeat.set(1 / 3, 1 / 3.2);
+  tex.anisotropy = 4;
+  return tex;
+}
+
 export function buildMyitkyinaOsm3DGroup(
   geojson: GeoJsonCollection,
   renderer: THREE.WebGLRenderer,
@@ -320,6 +480,11 @@ export function buildMyitkyinaOsm3DGroup(
   const roadCenterLineGeos: THREE.BufferGeometry[] = [];
   const roadResidentialGeos: THREE.BufferGeometry[] = [];
   const roadServiceGeos: THREE.BufferGeometry[] = [];
+  const sidewalkGeos: THREE.BufferGeometry[] = [];
+  const curbGeos: THREE.BufferGeometry[] = [];
+  const signPositions: number[] = [];
+  const signUvs: number[] = [];
+  let signCount = 0;
 
   const labeledStreetNames = new Set<string>();
   const labeledBuildingNames = new Set<string>();
@@ -406,6 +571,13 @@ export function buildMyitkyinaOsm3DGroup(
         roadTrunkGeos.push(ribbonGeo);
         const centerLineGeo = createRoadRibbonGeometry(worldPts, 0.18, yOffset + 0.02);
         if (centerLineGeo) roadCenterLineGeos.push(centerLineGeo);
+        // Sidewalks with a curb on both sides of main streets
+        for (const side of [1, -1]) {
+          const walk = createRoadRibbonGeometry(offsetPolyline(worldPts, side * (width / 2 + 1.1)), 2.0, 0.24);
+          if (walk) sidewalkGeos.push(walk);
+          const curb = createRoadRibbonGeometry(offsetPolyline(worldPts, side * (width / 2 + 0.08)), 0.18, 0.3);
+          if (curb) curbGeos.push(curb);
+        }
       } else if (hwy === 'residential' || hwy === 'living_street' || hwy === 'unclassified') {
         roadResidentialGeos.push(ribbonGeo);
       } else {
@@ -716,23 +888,27 @@ export function buildMyitkyinaOsm3DGroup(
       wallGeo.translate(cx, baseY, cz);
       wallBuckets[wallKey].push(wallGeo);
 
-      // Clean 2-tier architectural roof (ZERO outward bevel spikes or neighbor overlap!)
-      const roofBaseGeo = new THREE.ExtrudeGeometry(wallShape, {
-        depth: 0.36,
-        bevelEnabled: false,
-      });
-      roofBaseGeo.rotateX(-Math.PI / 2);
-      roofBaseGeo.translate(cx, baseY + height, cz);
-      roofBuckets[roofKey].push(roofBaseGeo);
-
-      const roofCrownGeo = new THREE.ExtrudeGeometry(crownShape, {
-        depth: 0.42,
-        bevelEnabled: false,
-      });
-      roofCrownGeo.rotateX(-Math.PI / 2);
-      roofCrownGeo.translate(cx, baseY + height + 0.36, cz);
-      if (isConvex) roofBuckets[roofKey].push(roofCrownGeo);
-      else roofCrownGeo.dispose();
+      // Roofs: houses that are roughly rectangular get a pitched zinc roof (hip or gable),
+      // large / irregular buildings get a flat concrete roof slab with a parapet.
+      const box = orientedBox(cleanLocalPts);
+      const footprintArea = Math.abs(signedArea) / 2;
+      const fill = footprintArea / Math.max(1, box.L * box.D);
+      const pitched = fill > 0.78 && footprintArea < 650 && height < 10 && box.D > 3;
+      if (pitched) {
+        roofBuckets[roofKey].push(buildPitchedRoof(box, cx, cz, baseY + height, hash % 3 !== 0));
+      } else {
+        const roofBaseGeo = new THREE.ExtrudeGeometry(wallShape, { depth: 0.3, bevelEnabled: false });
+        roofBaseGeo.rotateX(-Math.PI / 2);
+        roofBaseGeo.translate(cx, baseY + height, cz);
+        roofBuckets.darkSlate.push(roofBaseGeo);
+        if (isConvex) {
+          // Low parapet ring: outer slab minus a slightly smaller inner slab reads as a parapet edge
+          const parapet = new THREE.ExtrudeGeometry(crownShape, { depth: 0.12, bevelEnabled: false });
+          parapet.rotateX(-Math.PI / 2);
+          parapet.translate(cx, baseY + height + 0.3, cz);
+          roofBuckets.darkSlate.push(parapet);
+        }
+      }
 
       const roofHexMap: Record<keyof typeof roofBuckets, string> = {
         redZinc: '#ef4444',
@@ -741,6 +917,79 @@ export function buildMyitkyinaOsm3DGroup(
         goldCivic: '#f59e0b',
         darkSlate: '#64748b',
       };
+      // Shop signboard on buildings that front a main street (about half of them)
+      if (hash % 2 === 0 && signCount < 2500) {
+        let best: OsmRoadSegmentSample | null = null;
+        let bestD = 22;
+        let bx = 0;
+        let bz = 0;
+        for (const seg of roadSegments) {
+          const h = seg.highway;
+          if (h !== 'trunk' && h !== 'primary' && h !== 'secondary' && h !== 'tertiary' && h !== 'unclassified') continue;
+          if (Math.abs(seg.x1 - cx) > 60 && Math.abs(seg.x2 - cx) > 60) continue;
+          if (Math.abs(seg.z1 - cz) > 60 && Math.abs(seg.z2 - cz) > 60) continue;
+          const vx = seg.x2 - seg.x1;
+          const vz = seg.z2 - seg.z1;
+          const L2 = vx * vx + vz * vz || 1;
+          const t = Math.max(0, Math.min(1, ((cx - seg.x1) * vx + (cz - seg.z1) * vz) / L2));
+          const px = seg.x1 + vx * t;
+          const pz = seg.z1 + vz * t;
+          const d = Math.hypot(px - cx, pz - cz);
+          if (d < bestD) {
+            bestD = d;
+            best = seg;
+            bx = px;
+            bz = pz;
+          }
+        }
+        if (best) {
+          // Direction to the street; walk from the centroid to the wall in that direction
+          const dx = (bx - cx) / (bestD || 1);
+          const dz = (bz - cz) / (bestD || 1);
+          let wallDist = 0;
+          for (let step = 0; step < 60; step++) {
+            const qx = dx * step * 0.5;
+            const qy = -dz * step * 0.5;
+            let inside = false;
+            for (let i = 0, j = cleanLocalPts.length - 1; i < cleanLocalPts.length; j = i++) {
+              const a = cleanLocalPts[i];
+              const b = cleanLocalPts[j];
+              if (a.y > qy !== b.y > qy && qx < ((b.x - a.x) * (qy - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+            }
+            if (!inside) break;
+            wallDist = step * 0.5;
+          }
+          const sw = Math.min(4.2, Math.max(2.2, maxSpan * 0.45));
+          const shh = sw * 0.28;
+          const sx = cx + dx * (wallDist + 0.35);
+          const sz = cz + dz * (wallDist + 0.35);
+          const sy = baseY + Math.min(height - 0.4, 3.1);
+          // Sign plane faces the street: right vector perpendicular to (dx, dz)
+          const rx = -dz * (sw / 2);
+          const rz = dx * (sw / 2);
+          const corners = [
+            [sx - rx, sy - shh / 2, sz - rz],
+            [sx + rx, sy - shh / 2, sz + rz],
+            [sx + rx, sy + shh / 2, sz + rz],
+            [sx - rx, sy + shh / 2, sz - rz],
+          ];
+          const idx = (hash >> 3) % SHOP_SIGNS.length;
+          const u0 = (idx % 4) / 4;
+          const v0 = 1 - (Math.floor(idx / 4) + 1) / 4;
+          const uv = [
+            [u0 + 0.25, v0],
+            [u0, v0],
+            [u0, v0 + 0.25],
+            [u0 + 0.25, v0 + 0.25],
+          ];
+          for (const k of [0, 1, 2, 0, 2, 3]) {
+            signPositions.push(...corners[k]);
+            signUvs.push(...uv[k]);
+          }
+          signCount++;
+        }
+      }
+
       buildingFootprints.push({
         x: Math.round(cx * 10) / 10,
         z: Math.round(cz * 10) / 10,
@@ -811,15 +1060,16 @@ export function buildMyitkyinaOsm3DGroup(
   // ==========================================================================
   // 3. MERGE GEOMETRIES BY MATERIAL BUCKET WITH FRUSTUM CULLING DISABLED
   // ==========================================================================
+  const windowTex = createWindowWallTexture();
   const wallMaterials: Record<keyof typeof wallBuckets, THREE.MeshStandardMaterial> = {
-    civic: new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.6, metalness: 0.14, side: THREE.DoubleSide }),
-    hospital: new THREE.MeshStandardMaterial({ color: '#bae6fd', roughness: 0.55, metalness: 0.12, side: THREE.DoubleSide }),
-    school: new THREE.MeshStandardMaterial({ color: '#fde68a', roughness: 0.65, metalness: 0.1, side: THREE.DoubleSide }),
-    religious: new THREE.MeshStandardMaterial({ color: '#fef3c7', roughness: 0.5, metalness: 0.2, side: THREE.DoubleSide }),
-    residentialCream: new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.72, metalness: 0.08, side: THREE.DoubleSide }),
-    residentialTeal: new THREE.MeshStandardMaterial({ color: '#d9ebe4', roughness: 0.7, metalness: 0.1, side: THREE.DoubleSide }),
-    residentialWarm: new THREE.MeshStandardMaterial({ color: '#fed7aa', roughness: 0.72, metalness: 0.08, side: THREE.DoubleSide }),
-    residentialBrick: new THREE.MeshStandardMaterial({ color: '#fdba74', roughness: 0.76, metalness: 0.06, side: THREE.DoubleSide }),
+    civic: new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.6, metalness: 0.14, side: THREE.DoubleSide, map: windowTex }),
+    hospital: new THREE.MeshStandardMaterial({ color: '#bae6fd', roughness: 0.55, metalness: 0.12, side: THREE.DoubleSide, map: windowTex }),
+    school: new THREE.MeshStandardMaterial({ color: '#fde68a', roughness: 0.65, metalness: 0.1, side: THREE.DoubleSide, map: windowTex }),
+    religious: new THREE.MeshStandardMaterial({ color: '#fef3c7', roughness: 0.5, metalness: 0.2, side: THREE.DoubleSide, map: windowTex }),
+    residentialCream: new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.72, metalness: 0.08, side: THREE.DoubleSide, map: windowTex }),
+    residentialTeal: new THREE.MeshStandardMaterial({ color: '#d9ebe4', roughness: 0.7, metalness: 0.1, side: THREE.DoubleSide, map: windowTex }),
+    residentialWarm: new THREE.MeshStandardMaterial({ color: '#efe2c8', roughness: 0.72, metalness: 0.08, side: THREE.DoubleSide, map: windowTex }),
+    residentialBrick: new THREE.MeshStandardMaterial({ color: '#dcc0a6', roughness: 0.76, metalness: 0.06, side: THREE.DoubleSide, map: windowTex }),
   };
 
   for (const [key, geos] of Object.entries(wallBuckets)) {
@@ -838,11 +1088,12 @@ export function buildMyitkyinaOsm3DGroup(
   }
 
   const roofMaterials: Record<keyof typeof roofBuckets, THREE.MeshStandardMaterial> = {
-    redZinc: new THREE.MeshStandardMaterial({ color: '#b91c1c', roughness: 0.48, metalness: 0.32, side: THREE.DoubleSide }),
-    blueZinc: new THREE.MeshStandardMaterial({ color: '#0284c7', roughness: 0.48, metalness: 0.35, side: THREE.DoubleSide }),
-    greenZinc: new THREE.MeshStandardMaterial({ color: '#16a34a', roughness: 0.5, metalness: 0.3, side: THREE.DoubleSide }),
+    // Weathered corrugated zinc, as on most Myitkyina roofs
+    redZinc: new THREE.MeshStandardMaterial({ color: '#9a4a3a', roughness: 0.62, metalness: 0.35, side: THREE.DoubleSide }),
+    blueZinc: new THREE.MeshStandardMaterial({ color: '#4b6f8c', roughness: 0.6, metalness: 0.4, side: THREE.DoubleSide }),
+    greenZinc: new THREE.MeshStandardMaterial({ color: '#4f7a5a', roughness: 0.62, metalness: 0.35, side: THREE.DoubleSide }),
     goldCivic: new THREE.MeshStandardMaterial({ color: '#f59e0b', roughness: 0.32, metalness: 0.68, side: THREE.DoubleSide }),
-    darkSlate: new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.58, metalness: 0.25, side: THREE.DoubleSide }),
+    darkSlate: new THREE.MeshStandardMaterial({ color: '#8a8f93', roughness: 0.75, metalness: 0.2, side: THREE.DoubleSide }),
   };
 
   for (const [key, geos] of Object.entries(roofBuckets)) {
@@ -947,6 +1198,45 @@ export function buildMyitkyinaOsm3DGroup(
       group.add(svcMesh);
     }
     roadServiceGeos.forEach((g) => g.dispose());
+  }
+
+  // Sidewalks, curbs and shop signboards
+  const addMerged = (geos: THREE.BufferGeometry[], mat: THREE.Material, shadow: boolean) => {
+    if (geos.length === 0) return;
+    const merged = mergeGeometries(geos, false);
+    geos.forEach((g) => g.dispose());
+    if (!merged) return;
+    merged.computeVertexNormals();
+    merged.computeBoundingSphere();
+    const mesh = new THREE.Mesh(merged, mat);
+    mesh.receiveShadow = true;
+    mesh.castShadow = shadow;
+    mesh.frustumCulled = false;
+    group.add(mesh);
+  };
+  addMerged(
+    sidewalkGeos,
+    new THREE.MeshStandardMaterial({
+      color: '#bdb8ae',
+      roughness: 0.9,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+    }),
+    false,
+  );
+  addMerged(curbGeos, new THREE.MeshStandardMaterial({ color: '#e7e5e4', roughness: 0.8, side: THREE.DoubleSide }), false);
+  if (signCount > 0) {
+    const signGeo = new THREE.BufferGeometry();
+    signGeo.setAttribute('position', new THREE.Float32BufferAttribute(signPositions, 3));
+    signGeo.setAttribute('uv', new THREE.Float32BufferAttribute(signUvs, 2));
+    signGeo.computeVertexNormals();
+    const signMesh = new THREE.Mesh(
+      signGeo,
+      new THREE.MeshStandardMaterial({ map: createShopSignAtlas(), roughness: 0.55, side: THREE.DoubleSide }),
+    );
+    signMesh.frustumCulled = false;
+    group.add(signMesh);
   }
 
   // ==========================================================================

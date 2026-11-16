@@ -327,3 +327,125 @@ export function createContactShadowTexture(): THREE.CanvasTexture {
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
 }
+
+// Painted emblems seen on Manau poles: sun, moon, star and hornbill
+export function createManauMotifTexture(
+  renderer: THREE.WebGLRenderer,
+  motif: 'sun' | 'moon' | 'star' | 'hornbill',
+): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 256;
+  const g = c.getContext('2d')!;
+  g.clearRect(0, 0, 256, 256);
+  // Round white plate with red rim
+  g.fillStyle = '#fef3c7';
+  g.beginPath();
+  g.arc(128, 128, 120, 0, Math.PI * 2);
+  g.fill();
+  g.lineWidth = 12;
+  g.strokeStyle = '#991b1b';
+  g.stroke();
+
+  if (motif === 'sun') {
+    g.fillStyle = '#f59e0b';
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * Math.PI * 2;
+      g.beginPath();
+      g.moveTo(128 + Math.cos(a - 0.12) * 48, 128 + Math.sin(a - 0.12) * 48);
+      g.lineTo(128 + Math.cos(a) * 96, 128 + Math.sin(a) * 96);
+      g.lineTo(128 + Math.cos(a + 0.12) * 48, 128 + Math.sin(a + 0.12) * 48);
+      g.fill();
+    }
+    g.fillStyle = '#dc2626';
+    g.beginPath();
+    g.arc(128, 128, 44, 0, Math.PI * 2);
+    g.fill();
+  } else if (motif === 'moon') {
+    g.fillStyle = '#1e3a8a';
+    g.beginPath();
+    g.arc(128, 128, 78, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#fef3c7';
+    g.beginPath();
+    g.arc(158, 112, 66, 0, Math.PI * 2);
+    g.fill();
+  } else if (motif === 'star') {
+    g.fillStyle = '#15803d';
+    g.beginPath();
+    for (let k = 0; k < 10; k++) {
+      const r = k % 2 === 0 ? 92 : 38;
+      const a = -Math.PI / 2 + (k / 10) * Math.PI * 2;
+      const x = 128 + Math.cos(a) * r;
+      const y = 128 + Math.sin(a) * r;
+      if (k === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    }
+    g.closePath();
+    g.fill();
+  } else {
+    // Hornbill in profile: body, tail, big curved bill with casque
+    g.fillStyle = '#111827';
+    g.beginPath();
+    g.ellipse(118, 140, 52, 34, -0.2, 0, Math.PI * 2); // body
+    g.fill();
+    g.beginPath();
+    g.moveTo(70, 150);
+    g.lineTo(32, 190);
+    g.lineTo(58, 196);
+    g.lineTo(88, 162);
+    g.fill(); // tail
+    g.beginPath();
+    g.arc(160, 102, 22, 0, Math.PI * 2); // head
+    g.fill();
+    g.fillStyle = '#f59e0b';
+    g.beginPath();
+    g.moveTo(176, 96);
+    g.quadraticCurveTo(220, 100, 232, 140);
+    g.quadraticCurveTo(206, 120, 176, 114);
+    g.fill(); // bill
+    g.fillStyle = '#dc2626';
+    g.beginPath();
+    g.moveTo(172, 90);
+    g.quadraticCurveTo(206, 72, 222, 104);
+    g.quadraticCurveTo(200, 92, 178, 98);
+    g.fill(); // casque
+    g.fillStyle = '#fef3c7';
+    g.beginPath();
+    g.arc(164, 98, 4, 0, Math.PI * 2);
+    g.fill(); // eye
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
+// Union of Myanmar flag: yellow / green / red bands with a white star
+export function createMyanmarFlagTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 192;
+  c.height = 128;
+  const g = c.getContext('2d')!;
+  const bands = ['#fecb00', '#34b233', '#ea2839'];
+  bands.forEach((col, k) => {
+    g.fillStyle = col;
+    g.fillRect(0, (k * 128) / 3, 192, 128 / 3 + 1);
+  });
+  g.fillStyle = '#ffffff';
+  g.beginPath();
+  for (let k = 0; k < 10; k++) {
+    const r = k % 2 === 0 ? 52 : 20;
+    const a = -Math.PI / 2 + (k / 10) * Math.PI * 2;
+    const x = 96 + Math.cos(a) * r;
+    const y = 70 + Math.sin(a) * r;
+    if (k === 0) g.moveTo(x, y);
+    else g.lineTo(x, y);
+  }
+  g.closePath();
+  g.fill();
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}

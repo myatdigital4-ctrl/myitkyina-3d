@@ -50,6 +50,8 @@ import {
   createSkyAndWeatherSystem,
   DELIVERY_STOPS,
   FISHING_SPOTS,
+  SCENIC_ROUTES,
+  type ScenicRouteId,
   FishingSpotNode,
   TIME_TRIAL_GATES,
 } from '../world/livingWorld';
@@ -205,6 +207,9 @@ export interface GameControllerActions {
   teleportToRegion: (x: number, z: number, nameMm: string) => void;
   summonVehicle: (type: 'ebike' | 'hilux4x4' | 'tuktuk' | 'riverboat') => void;
   setTimeOfDay: (tod: TimeOfDay) => void;
+  /** Relaxed, untimed routes: sunset e-bike ride or early-morning jog */
+  startScenicRoute: (id: ScenicRouteId) => void;
+  stopScenicRoute: () => void;
   setWeather: (weather: WeatherMode) => void;
   startFoodDelivery: () => void;
   startStreetTimeTrial: () => void;
@@ -445,6 +450,20 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
     scene.add(stationMarker);
     /** Seconds left to deliver the luggage once picked up (0 = not carrying) */
     let stationTimer = 0;
+    /** Active relaxed route and the index of the next stop */
+    let scenicRoute: { id: ScenicRouteId; idx: number } | null = null;
+    const scenicRing = new THREE.Mesh(
+      new THREE.TorusGeometry(4.2, 0.18, 10, 48),
+      new THREE.MeshStandardMaterial({
+        color: '#fde68a',
+        emissive: '#f59e0b',
+        emissiveIntensity: 1.2,
+        transparent: true,
+        opacity: 0.8,
+      }),
+    );
+    scenicRing.visible = false;
+    scene.add(scenicRing);
     let stationWarned = false;
 
     // Myitsone and Jaw Bum are far outside the 3 km map. The peace bell stays as an
@@ -2207,6 +2226,33 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
             : 'Use Left Joystick or Gas/Brake Pedals',
         );
       },
+      startScenicRoute: (id: ScenicRouteId) => {
+        const route = SCENIC_ROUTES[id];
+        const ctl = controllerRef.current;
+        if (!ctl) return;
+        if (sim.isFishing) stopFishingMode(true);
+        sim.activeChallenge = null;
+        const first = route.stops[0];
+        if (id === 'sunset_ride') {
+          applyAtmosphere('sunset', 'clear');
+          // Start a little before the first ring, on the e-bike
+          ctl.teleportToRegion(first.x, first.z - 40, route.titleMm);
+          ctl.summonVehicle('ebike');
+          soundEngine.playMusicTrack('sample1');
+        } else {
+          applyAtmosphere('morning', 'mist');
+          if (sim.activeVehicle) ctl.toggleEnterExitVehicle();
+          ctl.teleportToRegion(0, 62, route.titleMm);
+          soundEngine.playMusicTrack('off');
+        }
+        scenicRoute = { id, idx: 0 };
+        showBanner(`🌅 ${route.titleMm}`, `${first.captionMm} — အချိန်ကန့်သတ်ချက် မရှိပါ၊ အေးအေးဆေးဆေး`);
+      },
+      stopScenicRoute: () => {
+        scenicRoute = null;
+        scenicRing.visible = false;
+        sim.customWaypoint = null;
+      },
       setTimeOfDay: (tod: TimeOfDay) => {
         applyAtmosphere(tod, sim.weather);
       },
@@ -3344,6 +3390,7 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
           if (
             sim.customWaypoint &&
             !sim.activeChallenge &&
+            !scenicRoute &&
             Math.hypot(sim.playerX - sim.customWaypoint.x, sim.playerZ - sim.customWaypoint.z) < 12
           ) {
             showBanner(
@@ -3380,6 +3427,30 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
                 `⚡ NITRO TURBO BOOST!`,
                 `အမြန်နှုန်းနှင့် အားအင် (Stamina 100%) တိုးမြင့်သွားပါပြီ! (${sim.comboCount}x Combo)`,
               );
+            }
+          }
+
+          // Relaxed scenic route: glide through glowing rings, a caption at each stop, no timer
+          if (scenicRoute) {
+            const route = SCENIC_ROUTES[scenicRoute.id];
+            const stop = route.stops[scenicRoute.idx];
+            scenicRing.visible = true;
+            scenicRing.position.set(stop.x, groundHeightAt(stop.x, stop.z) + 2.4, stop.z);
+            scenicRing.rotation.y += dt * 0.6;
+            sim.customWaypoint = { x: stop.x, z: stop.z, labelMm: route.titleMm };
+            if (scenicRoute.id === 'morning_jog') sim.stamina = 100;
+            if (Math.hypot(stop.x - sim.playerX, stop.z - sim.playerZ) < 9) {
+              soundEngine.playJadeCollect(1);
+              scenicRoute.idx += 1;
+              if (scenicRoute.idx >= route.stops.length) {
+                sim.jadeCount += route.rewardMmk;
+                showBanner(`🌅 ${route.titleMm} — ပြီးဆုံးပါပြီ`, `${stop.captionMm} (+${route.rewardMmk.toLocaleString()} MMK)`);
+                scenicRoute = null;
+                scenicRing.visible = false;
+                sim.customWaypoint = null;
+              } else {
+                showBanner(`${route.titleMm} (${scenicRoute.idx}/${route.stops.length})`, stop.captionMm);
+              }
             }
           }
 

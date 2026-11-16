@@ -1659,3 +1659,66 @@ export function createAyeyarwadyFishingSpots() {
 }
 
 
+
+// ============================================================================
+// RELAXED SCENIC ROUTES (no timer): sunset ride along the river, early-morning jog
+// ============================================================================
+export interface ScenicStop {
+  x: number;
+  z: number;
+  captionMm: string;
+}
+
+function sunsetRideStops(): ScenicStop[] {
+  const captions = [
+    'ဧရာဝတီမြစ်ပေါ် နေဝင်ရောင် ဖြာကျနေပြီ — ဖြည်းဖြည်း မောင်းပါ',
+    'မြစ်ကမ်းဘေး လေညင်းလေး တိုက်ခတ်လာတယ်',
+    'တံငါလှေလေးတွေ ကမ်းကပ်လာကြပြီ',
+    'ကမ်းနားလမ်းပေါ်က လက်ဖက်ရည်ဆိုင်တွေ မီးထွန်းလာကြပြီ',
+    'အဝေးက တောင်တန်းတွေ ခရမ်းရောင် ပြောင်းလာပြီ',
+  ];
+  const z0 = MAP_PLACES.strandNorth.z;
+  const z1 = MAP_PLACES.pagodaJetty.z - 70;
+  const stops: ScenicStop[] = captions.map((captionMm, i) => {
+    const z = z0 + ((z1 - z0) * i) / (captions.length - 1);
+    const p = nearestStreetPoint(riverCenterX(z) - riverHalfWidth(z) - 35, z);
+    return { x: Math.round(p.x), z: Math.round(p.z), captionMm };
+  });
+  const end = roadsidePoint(MAP_PLACES.pagodaJetty.x, MAP_PLACES.pagodaJetty.z, 0);
+  stops.push({
+    x: Math.round(end.x),
+    z: Math.round(end.z),
+    captionMm: 'ဆုတောင်းပြည့်စေတီ ရွှေရောင် တောက်ပနေတယ် — ခရီးဆုံးပါပြီ',
+  });
+  return stops;
+}
+
+function morningJogStops(): ScenicStop[] {
+  // A loop of real streets around the Manau grounds, about 1 km
+  const corners: [number, number, string][] = [
+    [220, -180, 'မနက် ၅ နာရီခွဲ — မြူနှင်းတွေ မှုန်ဝါးနေတုန်း'],
+    [240, 200, 'ဘုန်းကြီးကျောင်းက ခေါင်းလောင်းသံ သဲ့သဲ့ ကြားရတယ်'],
+    [-200, 220, 'မုန့်ဟင်းခါးဆိုင်တွေ ဆိုင်ဖွင့်စ ပြုပြီ'],
+    [-220, -200, 'လမ်းဘေးမှာ မနက်စောစော လမ်းလျှောက်သူတွေ'],
+  ];
+  const stops: ScenicStop[] = corners.map(([x, z, captionMm]) => {
+    const p = nearestStreetPoint(x, z);
+    return { x: Math.round(p.x), z: Math.round(p.z), captionMm };
+  });
+  stops.push({ x: 0, z: 62, captionMm: 'မနောတိုင်တွေပေါ် နေရောင်ခြည် ထိုးစ ပြုပြီ — ပြေးပြီးပါပြီ' });
+  return stops;
+}
+
+export const SCENIC_ROUTES = {
+  sunset_ride: {
+    titleMm: 'နေဝင်ချိန် ဆိုင်ကယ်စီး',
+    stops: sunsetRideStops(),
+    rewardMmk: 15000,
+  },
+  morning_jog: {
+    titleMm: 'မနက်ခင်း အစောကြီး ပြေးလွှား',
+    stops: morningJogStops(),
+    rewardMmk: 10000,
+  },
+} as const;
+export type ScenicRouteId = keyof typeof SCENIC_ROUTES;

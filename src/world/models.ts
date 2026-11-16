@@ -10,7 +10,9 @@ import {
   bridgeDeckHeightAt,
   createContactShadowTexture,
   createKachinWeaveTexture,
+  createManauMotifTexture,
   createManauTotemTexture,
+  createMyanmarFlagTexture,
   createSignboardTexture,
   groundHeightAt,
   riverCenterX,
@@ -172,93 +174,133 @@ export function createManauParkComplex(
   innerCircle.receiveShadow = true;
   group.add(innerCircle);
 
-  // Extruded curved Hornbill/Bull horn crest shape for the top of each Manau Totem
-  const crestShape = new THREE.Shape();
-  crestShape.moveTo(-1.3, 0);
-  crestShape.quadraticCurveTo(0, 0.5, 1.3, 0);
-  crestShape.quadraticCurveTo(1.8, 1.4, 0.8, 2.2);
-  crestShape.quadraticCurveTo(0, 1.1, -0.8, 2.2);
-  crestShape.quadraticCurveTo(-1.8, 1.4, -1.3, 0);
-
-  const crestGeo = new THREE.ExtrudeGeometry(crestShape, {
-    depth: 0.25,
-    bevelEnabled: true,
-    bevelThickness: 0.06,
-    bevelSize: 0.05,
-    bevelSegments: 2,
-  });
-  crestGeo.center();
-
   const goldMat = new THREE.MeshStandardMaterial({
     color: '#f59e0b',
     roughness: 0.24,
     metalness: 0.82,
   });
-  const obsidianMat = new THREE.MeshStandardMaterial({
-    color: '#0f172a',
-    roughness: 0.55,
-    metalness: 0.25,
-  });
+  const concreteMat = new THREE.MeshStandardMaterial({ color: '#e7e5e4', roughness: 0.85, metalness: 0.02 });
 
-  // 8 Towering Manau Shadau Totem Poles arranged in the iconic fan row
-  const numTotems = 8;
-  for (let i = 0; i < numTotems; i++) {
-    const totemGroup = new THREE.Group();
-    const offsetIndex = i - (numTotems - 1) / 2;
-    const tx = offsetIndex * 3.1;
-    const tz = -3.0 + Math.abs(offsetIndex) * 0.55;
-    const poleHeight = 15.5 - Math.abs(offsetIndex) * 0.75;
+  // Manau poles (shadung), modeled on the Kachin National Manau Park in Myitkyina:
+  // about 12 connected concrete pillars, ~20 m at the center, painted with patterns and
+  // sun / moon / star / hornbill motifs, with flags on the two central poles.
+  const poleCount = 12;
+  const poleW = 1.5;
+  const poleT = 0.45;
+  const gap = 0.55;
+  const rowZ = -4;
+  const poleTops: number[] = [];
+  const motifTextures = (['sun', 'moon', 'star', 'hornbill'] as const).map((m) =>
+    createManauMotifTexture(renderer, m),
+  );
 
-    totemGroup.position.set(tx, 0.42, tz);
+  // Raised concrete base under the whole row
+  const rowLen = poleCount * (poleW + gap);
+  const base = new THREE.Mesh(new THREE.BoxGeometry(rowLen + 2.4, 1.1, 4.2), concreteMat);
+  base.position.set(0, 0.55 + 0.42, rowZ);
+  base.castShadow = true;
+  base.receiveShadow = true;
+  group.add(base);
+  const baseTopY = 0.42 + 1.1;
 
-    const ped = new THREE.Mesh(
-      new THREE.BoxGeometry(1.6, 0.95, 1.6),
-      obsidianMat,
-    );
-    ped.position.y = 0.48;
-    ped.castShadow = true;
-    totemGroup.add(ped);
+  for (let i = 0; i < poleCount; i++) {
+    const offset = i - (poleCount - 1) / 2; // -5.5 .. 5.5
+    const tx = offset * (poleW + gap);
+    // Central pair tallest (~20 m), stepping down toward the ends
+    const h = 20 - Math.max(0, Math.abs(offset) - 0.5) * 1.35;
+    poleTops.push(baseTopY + h);
 
-    const totemTex = createManauTotemTexture(renderer, i);
-    const poleMat = new THREE.MeshStandardMaterial({
-      map: totemTex,
-      roughness: 0.45,
-      metalness: 0.1,
+    const tex = createManauTotemTexture(renderer, i);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(1, Math.max(1, Math.round(h / 6)));
+    const paintMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6, metalness: 0.05 });
+    const board = new THREE.Mesh(new THREE.BoxGeometry(poleW, h, poleT), [
+      concreteMat,
+      concreteMat,
+      concreteMat,
+      concreteMat,
+      paintMat,
+      paintMat,
+    ]);
+    board.position.set(tx, baseTopY + h / 2, rowZ);
+    board.castShadow = true;
+    group.add(board);
+
+    // Painted emblem disc (sun, moon, star or hornbill) on both faces
+    const emblemMat = new THREE.MeshStandardMaterial({
+      map: motifTextures[i % motifTextures.length],
+      transparent: true,
+      roughness: 0.5,
     });
-    const shaft = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.48, 0.58, poleHeight, 20),
-      poleMat,
-    );
-    shaft.position.y = 0.95 + poleHeight / 2;
-    shaft.castShadow = true;
-    totemGroup.add(shaft);
+    for (const side of [1, -1]) {
+      const disc = new THREE.Mesh(new THREE.PlaneGeometry(poleW * 0.92, poleW * 0.92), emblemMat);
+      disc.position.set(tx, baseTopY + h * 0.62, rowZ + side * (poleT / 2 + 0.02));
+      if (side < 0) disc.rotation.y = Math.PI;
+      group.add(disc);
+    }
 
-    const collar = new THREE.Mesh(
-      new THREE.TorusGeometry(0.55, 0.09, 10, 24),
-      goldMat,
-    );
-    collar.rotation.x = Math.PI / 2;
-    collar.position.y = 0.95 + poleHeight;
-    totemGroup.add(collar);
-
-    const crest = new THREE.Mesh(crestGeo, goldMat);
-    crest.position.y = 0.95 + poleHeight + 0.95;
-    crest.castShadow = true;
-    totemGroup.add(crest);
-
-    group.add(totemGroup);
+    // Pointed cap
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(poleW * 0.62, 1.1, 4), goldMat);
+    cap.rotation.y = Math.PI / 4;
+    cap.scale.z = poleT / poleW + 0.15;
+    cap.position.set(tx, baseTopY + h + 0.55, rowZ);
+    group.add(cap);
   }
 
-  // Traditional Kachin Ceremonial Pavilion (North end of Manau Plaza)
+  // Horizontal beams tying the pillars together (the poles are "connected")
+  const beamTex = createManauTotemTexture(renderer, 3);
+  beamTex.wrapS = THREE.RepeatWrapping;
+  beamTex.repeat.set(6, 1);
+  const beamMat = new THREE.MeshStandardMaterial({ map: beamTex, roughness: 0.6 });
+  for (const beamY of [baseTopY + 5.5, baseTopY + 11.5]) {
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(rowLen - gap, 0.7, poleT + 0.12), beamMat);
+    beam.position.set(0, beamY, rowZ);
+    beam.castShadow = true;
+    group.add(beam);
+  }
+
+  // Flags on the two central poles
+  const flagTex = createMyanmarFlagTexture();
+  const flagMat = new THREE.MeshStandardMaterial({ map: flagTex, side: THREE.DoubleSide, roughness: 0.8 });
+  const poleMastMat = new THREE.MeshStandardMaterial({ color: '#cbd5e1', metalness: 0.7, roughness: 0.3 });
+  for (const k of [poleCount / 2 - 1, poleCount / 2]) {
+    const tx = (k - (poleCount - 1) / 2) * (poleW + gap);
+    const topY = poleTops[k] + 1.1;
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 4, 8), poleMastMat);
+    mast.position.set(tx, topY + 2, rowZ);
+    group.add(mast);
+    const flag = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.6), flagMat);
+    flag.position.set(tx + 1.25 * Math.sign(tx), topY + 3.1, rowZ);
+    group.add(flag);
+  }
+
+  // Open performance stage for the singers, north of the poles
   const pavilion = new THREE.Group();
   pavilion.position.set(0, 0.36, -22.5);
-  const hallBody = new THREE.Mesh(
-    new THREE.BoxGeometry(18, 4.6, 8.5),
+  const stageDeck = new THREE.Mesh(
+    new THREE.BoxGeometry(18, 1.2, 8.5),
     new THREE.MeshStandardMaterial({ color: '#7c2d12', roughness: 0.75, metalness: 0.08 }),
   );
-  hallBody.position.y = 2.3;
-  hallBody.castShadow = true;
-  pavilion.add(hallBody);
+  stageDeck.position.y = 0.6;
+  stageDeck.castShadow = true;
+  stageDeck.receiveShadow = true;
+  pavilion.add(stageDeck);
+  for (const sx of [-8.4, 8.4]) {
+    for (const sz of [-3.6, 3.6]) {
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 4.6, 10), goldMat);
+      col.position.set(sx, 3.5, sz);
+      col.castShadow = true;
+      pavilion.add(col);
+    }
+  }
+  // Backdrop wall in Kachin weave colors
+  const backdrop = new THREE.Mesh(
+    new THREE.BoxGeometry(17, 3.6, 0.25),
+    new THREE.MeshStandardMaterial({ color: '#991b1b', roughness: 0.7 }),
+  );
+  backdrop.position.set(0, 3.0, -4.0);
+  pavilion.add(backdrop);
 
   const roof = new THREE.Mesh(
     new THREE.ConeGeometry(13.5, 4.8, 4),
@@ -1578,9 +1620,9 @@ export interface SmugglerEnemy {
 }
 
 export function createSmugglerEnemies(): SmugglerEnemy[] {
-  // Smugglers hide along the west riverbank north of Strand Road
+  // Smugglers hide along the west riverbank south of the pagoda, away from the scenic ride
   const smugglerSpots = Array.from({ length: 8 }, (_, i) => {
-    const z = MAP_PLACES.strandNorth.z - 300 + i * 75;
+    const z = MAP_PLACES.strandSouth.z + 40 + i * 70;
     const x = riverCenterX(z) - riverHalfWidth(z) - 22 - (i % 3) * 14;
     return [Math.round(x), z];
   });

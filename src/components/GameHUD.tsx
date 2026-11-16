@@ -80,6 +80,7 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
   }, [hud.phase]);
   const [sprintLocked, setSprintLocked] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [musicOpen, setMusicOpen] = useState(false);
 
   // --- Map layers -------------------------------------------------------------
   // The 1:1 map has ~10k buildings. Re-rendering them on every HUD update (~11×/s)
@@ -134,8 +135,8 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
               y={bf.z - bf.d * 0.5}
               width={bf.w}
               height={bf.d}
-              fill={bf.color}
-              opacity="0.88"
+              fill="#55615c"
+              opacity="0.85"
             />
           ))}
       </>
@@ -202,8 +203,8 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
                 y={bf.z - bf.d * 0.5}
                 width={bf.w}
                 height={bf.d}
-                fill={bf.color}
-                opacity="0.92"
+                fill="#6b7a74"
+                opacity="0.9"
               />
             ))}
       </>
@@ -772,147 +773,13 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
             }}
           />
 
-          <button
-            onClick={() => controllerRef.current?.teleportToOsmCity()}
-            className="px-2 py-1 rounded text-[11px] font-extrabold bg-emerald-500 hover:bg-emerald-400 border-2 border-white text-slate-950 cursor-pointer whitespace-nowrap shadow-md"
-            title="Teleport to City — Spawns player on a collision-safe drivable OSM road inside dense Myitkyina 3D building clusters"
-          >
-            🏙️ မြို့လယ်သို့သွားမည်
-          </button>
-
-          <button
-            onClick={() => controllerRef.current?.toggleOverheadCamera()}
-            className={`px-2 py-1 rounded text-[11px] font-bold border cursor-pointer whitespace-nowrap shadow ${
-              hud.cameraMode === 'overhead'
-                ? 'bg-amber-400 border-white text-slate-950'
-                : 'bg-slate-800 hover:bg-slate-700 border-amber-400/60 text-amber-300'
-            }`}
-            title="Toggle Temporary Overhead Camera to inspect the imported Myitkyina OSM road & building network"
-          >
-            {hud.cameraMode === 'overhead' ? '🛰️ အပေါ်စီး ON' : '🛰️ အပေါ်စီးကင်မရာ'}
-          </button>
-
-          <button
-            onClick={() => controllerRef.current?.toggleOsmDebugMode()}
-            className={`px-2 py-1 rounded text-[11px] font-bold border cursor-pointer whitespace-nowrap shadow ${
-              hud.osm3d.debugMode
-                ? 'bg-cyan-400 border-white text-slate-950'
-                : 'bg-slate-900/95 hover:bg-slate-800 border-cyan-400/60 text-cyan-300'
-            }`}
-            title="Toggle Temporary OSM Debug Mode (Shows OSM Bounding Box, Player Pos, Nearest Road & Building Count)"
-          >
-            🔍 OSM Debug
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveDockTab('osm3d');
-              setDrawerOpen(true);
-            }}
-            className={`px-2 py-1 rounded text-[11px] font-bold border cursor-pointer whitespace-nowrap shadow hidden xl:inline-block ${
-              hud.osm3d.visible
-                ? 'bg-emerald-700 hover:bg-emerald-600 border-emerald-300 text-white'
-                : 'bg-slate-800 border-slate-500 text-slate-300'
-            }`}
-            title="Myitkyina OpenStreetMap 3D City Layer (1,123 Buildings + 2,821 Roads)"
-          >
-            🗺️ OSM ({hud.osm3d.buildingsCount + hud.osm3d.roadsCount})
-          </button>
-
-          <button
-            onClick={() => {
-              if (hud.fishing.active) {
-                controllerRef.current?.stopFishing();
-              } else {
-                controllerRef.current?.startFishingAtSpot('spot_balaminhtin');
-              }
-            }}
-            className={`px-2 py-1 rounded text-[11px] font-bold border cursor-pointer whitespace-nowrap shadow ${
-              hud.fishing.active
-                ? 'bg-sky-400 border-white text-slate-950 animate-pulse'
-                : 'bg-sky-600 hover:bg-sky-500 border-sky-300 text-white'
-            }`}
-            title="ဗလမင်းထင်တံတားအောက် & ဧရာဝတီမြစ်ဘေး ငါးမျှားဂိမ်းနှင့် ငါးအဝယ်ဒိုင်"
-          >
-            {hud.fishing.active
-              ? '🎣 ငါးမျှားရပ်မည်'
-              : hud.fishing.fishBasket.length > 0
-                ? `🎣 ငါးမျှား/ရောင်း (${hud.fishing.fishBasket.length})`
-                : '🎣 ငါးမျှား/ငါးဆိုင်'}
-          </button>
-
-          <button
-            onClick={() => controllerRef.current?.summonVehicle('ebike')}
-            className="px-2 py-1 rounded text-[11px] font-semibold bg-amber-500/95 hover:bg-amber-400 border border-yellow-300 text-slate-950 cursor-pointer whitespace-nowrap shadow"
-            title="Summon AIMA Electric Scooter (ဘက်ထရီဆိုင်ကယ် ခေါ်ယူရန်)"
-          >
-            🛵 ဘက်ထရီဆိုင်ကယ်
-          </button>
-
-          <button
-            onClick={() => controllerRef.current?.toggleManauDance()}
-            className={`px-2 py-1 rounded text-[11px] font-semibold border cursor-pointer whitespace-nowrap shadow hidden sm:inline-block ${
-              hud.isManauDancing
-                ? 'bg-amber-400 border-white text-slate-950 animate-pulse'
-                : 'bg-rose-700/95 hover:bg-rose-600 border-amber-300/80 text-amber-200'
-            }`}
-            title="ကချင်ရိုးရာ မနောအက ကရန် (Manau Festival Dance)"
-          >
-            {hud.isManauDancing ? '💃 ကနေသည်' : '💃 မနောအက'}
-          </button>
-
-          <button
-            onClick={() => controllerRef.current?.startFoodDelivery()}
-            className="px-2 py-1 rounded text-[11px] font-semibold bg-rose-600 hover:bg-rose-500 border border-rose-300 text-white cursor-pointer whitespace-nowrap shadow"
-            title="Start Kachin Food Delivery Job (+35,000 MMK)"
-          >
-            📦 မုန့်ပို့ (+35k)
-          </button>
-
-          <button
-            onClick={() => controllerRef.current?.startStreetTimeTrial()}
-            className="px-2 py-1 rounded text-[11px] font-semibold bg-indigo-600 hover:bg-indigo-500 border border-indigo-300 text-white cursor-pointer whitespace-nowrap shadow hidden lg:inline-block"
-            title="Start Sitapu Street Time Trial Race (+45,000 MMK)"
-          >
-            🏁 ပြိုင်ပွဲ (+45k)
-          </button>
-
-          <button
-            onClick={() => {
-              const nextWeather: WeatherMode =
-                hud.weather === 'clear' ? 'mist' : hud.weather === 'mist' ? 'rain' : 'clear';
-              controllerRef.current?.setWeather(nextWeather);
-            }}
-            className="px-2 py-1 rounded text-[11px] font-medium bg-[#0b1318]/92 border border-sky-400/50 text-sky-300 cursor-pointer whitespace-nowrap"
-            title="Toggle Myitkyina Weather (နေသာ / မြူနှင်း / မိုးရွာ)"
-          >
-            {hud.weather === 'clear' ? '☀ နေသာ' : hud.weather === 'mist' ? '🌫 မြူနှင်း' : '🌧 မိုးရွာ'}
-          </button>
-
-          <button
-            onClick={() => controllerRef.current?.resetCameraBehindPlayer()}
-            className="px-2 py-1 rounded text-[11px] font-medium bg-[#0b1318]/92 border border-white/15 text-sky-300 cursor-pointer whitespace-nowrap hidden md:inline-block"
-            title="Center Camera Behind Player (R)"
-          >
-            ကင်မရာတည့်
-          </button>
-
+          {/* Everything else lives in the menu (H / bottom button) to keep the view clean */}
           <button
             onClick={() => setFullMapOpen(true)}
-            className="px-2 py-1 rounded text-[11px] font-semibold bg-emerald-700 hover:bg-emerald-600 border border-emerald-400 text-white cursor-pointer whitespace-nowrap"
+            className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-[#0b1318]/80 border border-white/15 text-slate-100 cursor-pointer whitespace-nowrap"
+            title="Map (N)"
           >
-            ဂြိုဟ်တုမြေပုံ
-          </button>
-
-          <button
-            onClick={() => setShowMinimap((m) => !m)}
-            className={`px-2 py-1 rounded text-[11px] font-medium border cursor-pointer whitespace-nowrap ${
-              showMinimap
-                ? 'bg-[#0b1318]/92 border-emerald-400/60 text-emerald-300'
-                : 'bg-[#0b1318]/92 border-white/15 text-slate-400'
-            }`}
-          >
-            Map
+            🗺 မြေပုံ
           </button>
         </div>
 
@@ -974,7 +841,16 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
           )}
         </div>
 
-        {/* E-BIKE & MANAU MUSIC PLAYER BAR (Sample Song 1, Sample Song 2, Custom Song Slot, Off) */}
+        {/* Music player: collapsed to a small button unless open or riding */}
+        {!(musicOpen || hud.activeVehicle === 'ebike') ? (
+          <button
+            onClick={() => setMusicOpen(true)}
+            className="self-start px-2 py-1 rounded-md bg-[#0b1318]/70 border border-white/10 text-[11px] text-slate-200 cursor-pointer"
+            title="Music"
+          >
+            🎵{hud.musicTrack !== 'off' ? ' ♪' : ''}
+          </button>
+        ) : (
         <div
           className={`rounded-md px-2 py-1 flex flex-wrap items-center gap-1 shadow-lg border transition-colors ${
             hud.activeVehicle === 'ebike' || hud.isManauDancing
@@ -1041,7 +917,17 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
               🔇 ပိတ်
             </button>
           )}
+          {musicOpen && hud.activeVehicle !== 'ebike' && (
+            <button
+              onClick={() => setMusicOpen(false)}
+              className="px-1.5 py-0.5 text-[10px] text-slate-400 cursor-pointer"
+              aria-label="Hide music player"
+            >
+              ✕
+            </button>
+          )}
         </div>
+        )}
 
         {/* =========================================================================
             TEMPORARY OSM 3D DEBUG TELEMETRY PANEL (BOUNDING BOX, PLAYER, NEAREST ROAD & BUILDING COUNT)
@@ -2018,6 +1904,30 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
 
             {activeDockTab === 'minigames' && (
               <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-1">
+                {/* Relax: untimed scenic routes */}
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    onClick={() => {
+                      controllerRef.current?.startScenicRoute('sunset_ride');
+                      setDrawerOpen(false);
+                    }}
+                    className="p-2 rounded-lg text-left cursor-pointer border border-orange-300/50 bg-gradient-to-br from-orange-500/30 via-rose-600/25 to-indigo-900/40 hover:from-orange-500/45"
+                  >
+                    <div className="text-[12px] font-bold text-orange-100">🌅 နေဝင်ချိန် ဆိုင်ကယ်စီး</div>
+                    <div className="text-[10px] text-orange-200/80">ဧရာဝတီ ကမ်းနားလမ်းတစ်လျှောက် · အချိန်မကန့်သတ်</div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      controllerRef.current?.startScenicRoute('morning_jog');
+                      setDrawerOpen(false);
+                    }}
+                    className="p-2 rounded-lg text-left cursor-pointer border border-sky-200/50 bg-gradient-to-br from-sky-300/25 via-emerald-400/15 to-slate-700/30 hover:from-sky-300/40"
+                  >
+                    <div className="text-[12px] font-bold text-sky-50">🏃 မနက်ခင်း အစောကြီး ပြေး</div>
+                    <div className="text-[10px] text-sky-100/80">မြူနှင်းထဲ မနောကွင်းပတ်လည် · ~1 km</div>
+                  </button>
+                </div>
+
                 {/* Fishing Gear & Fish Shop Quick Actions */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                   <div className="p-2 rounded-lg bg-slate-900 border border-amber-400/50 flex flex-col justify-between gap-1.5">

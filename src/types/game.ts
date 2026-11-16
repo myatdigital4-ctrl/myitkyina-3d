@@ -6,6 +6,7 @@ import {
   OSM_NAMED_PLACES,
   OSM_ROAD_SEGMENTS,
   RIVER_POINTS,
+  WORLD_BOUNDS,
 } from '../world/mapData.generated';
 import { reserveLot, roadsidePoint } from '../world/worldLayout';
 
@@ -427,9 +428,11 @@ export const MAP_PLACES = {
   wunthoMonastery: namedPlace('ဝန်းသိုကျောင်းတိုက်'),
   /** City center (25.3833°N, 97.3964°E) — Myoma market area */
   downtown: latLngToWorld(25.3833, 97.3964),
-  pagodaJetty: riverBankAt(-150, 40),
-  strandNorth: riverBankAt(-800, 35),
-  strandSouth: riverBankAt(350, 35),
+  // Riverside places are spaced along the play area's north–south extent so they always
+  // stay inside WORLD_BOUNDS, whatever the generator picks as the origin.
+  strandNorth: riverBankAt(Math.round(WORLD_BOUNDS.minZ + 0.08 * (WORLD_BOUNDS.maxZ - WORLD_BOUNDS.minZ)), 35),
+  pagodaJetty: riverBankAt(Math.round(WORLD_BOUNDS.minZ + 0.3 * (WORLD_BOUNDS.maxZ - WORLD_BOUNDS.minZ)), 40),
+  strandSouth: riverBankAt(Math.round(WORLD_BOUNDS.minZ + 0.5 * (WORLD_BOUNDS.maxZ - WORLD_BOUNDS.minZ)), 35),
 };
 
 // Verified Collision-Safe Drivable OSM Road Spawn Points inside the Dense Myitkyina OSM City Clusters
@@ -1164,12 +1167,12 @@ const FAMOUS_PLACEMENT: Record<
     nameEn: 'Strand Road Fish Market & Gear Shop',
     quarterMm: 'ကမ်းနားလမ်း မြောက်ပိုင်း',
   },
-  bldg_palm_spring: { near: { x: 150, z: -650 } },
-  bldg_amber_palace: { near: { x: -350, z: -450 } },
-  bldg_hotel_myitkyina: { near: { x: 520, z: -260 } },
-  bldg_wun_tawp: { near: { x: -250, z: 300 } },
-  bldg_myitkyina_cafe: { near: { x: 120, z: -300 } },
-  bldg_sitapu_weaving: { near: { x: 350, z: 420 } },
+  bldg_palm_spring: { near: { x: MAP_PLACES.downtown.x + (150), z: MAP_PLACES.downtown.z + (-250) } },
+  bldg_amber_palace: { near: { x: MAP_PLACES.downtown.x + (-350), z: MAP_PLACES.downtown.z + (-100) } },
+  bldg_hotel_myitkyina: { near: { x: MAP_PLACES.railwayStation.x + (250), z: MAP_PLACES.railwayStation.z + (-350) } },
+  bldg_wun_tawp: { near: { x: MAP_PLACES.downtown.x + (-250), z: MAP_PLACES.downtown.z + (300) } },
+  bldg_myitkyina_cafe: { near: { x: MAP_PLACES.downtown.x + (120), z: MAP_PLACES.downtown.z + (100) } },
+  bldg_sitapu_weaving: { near: { x: MAP_PLACES.railwayStation.x + (300), z: MAP_PLACES.railwayStation.z + (300) } },
   bldg_sitapu_baptist: {
     near: { x: MAP_PLACES.kachinBaptist.x - 60, z: MAP_PLACES.kachinBaptist.z },
     quarterMm: 'ကချင်နှစ်ခြင်း အသင်းချုပ် ရပ်ကွက်',
@@ -1205,7 +1208,7 @@ export const MYITKYINA_FAMOUS_BUILDINGS: FamousBuildingInfo[] = LEGACY_FAMOUS_BU
 // ============================================================================
 export const MYITKYINA_ROAD_SEGMENTS: RoadSegmentDef[] = OSM_ROAD_SEGMENTS;
 
-/** Traffic lights at real junctions where 3+ paved main-road segments meet (up to 4, spread out). */
+/** Traffic lights at real junctions where 3+ paved main-road segments meet (up to 10, spread out). */
 function findMainJunctions(): { id: string; x: number; z: number; nameMm: string }[] {
   const counts = new Map<string, { x: number; z: number; n: number; name: string }>();
   for (const s of OSM_ROAD_SEGMENTS) {
@@ -1226,8 +1229,8 @@ function findMainJunctions(): { id: string; x: number; z: number; nameMm: string
     .sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
   const picked: typeof junctions = [];
   for (const j of junctions) {
-    if (picked.length >= 4) break;
-    if (picked.every((p) => Math.hypot(p.x - j.x, p.z - j.z) > 250)) picked.push(j);
+    if (picked.length >= 10) break;
+    if (picked.every((p) => Math.hypot(p.x - j.x, p.z - j.z) > 180)) picked.push(j);
   }
   return picked.map((j, i) => ({
     id: `tl_osm_${i}`,
@@ -1340,12 +1343,12 @@ export const INITIAL_QUESTS: QuestObjective[] = [
   },
   {
     id: 'quest_smugglers',
-    titleMm: 'ကမ်းနားလမ်းအနီးရှိ မှောင်ခိုဂိုဏ်း (၅) ဦး နှိမ်နင်းပါ',
+    titleMm: 'ကမ်းနားလမ်း တောင်ပိုင်းရှိ မှောင်ခိုဂိုဏ်း (၅) ဦး နှိမ်နင်းပါ',
     titleEn: 'Defeat 5 Rogue Smugglers (Security Bounty Job)',
     descriptionMm: 'ကချင်ဓား (Nhtu) သို့မဟုတ် 4x4 ကားဖြင့် မြစ်ကမ်းနား မှောင်ခိုဂိုဏ်းသားများကို တိုက်ခိုက်နှိမ်နင်း၍ ဆုကြေးငွေ ရယူပါ',
     targetRegion: 'strand_road',
-    targetX: MAP_PLACES.strandNorth.x,
-    targetZ: MAP_PLACES.strandNorth.z - 120,
+    targetX: MAP_PLACES.strandSouth.x,
+    targetZ: MAP_PLACES.strandSouth.z + 120,
     progress: 0,
     goal: 5,
     rewardJade: 60000,
