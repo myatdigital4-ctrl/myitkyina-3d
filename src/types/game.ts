@@ -423,9 +423,10 @@ export const MAP_PLACES = {
   railwayStation: namedPlace('Myitkyina Railway Station'),
   cityHall: namedPlace('City Hall'),
   ramjankiTemple: namedPlace('Shree Ramjanki Temple'),
-  kachinBaptist: namedPlace('Kachin Su Biblical Baptish Church'),
-  kbcHeadquarters: namedPlace('မြစ်ကြီးနားဇုံနယ် ကချင်နှစ်ခြင်း အသင်းချုပ်'),
-  wunthoMonastery: namedPlace('ဝန်းသိုကျောင်းတိုက်'),
+  /** Lyon Memorial Biblical Baptist Church, just south of the Manau park (Google Maps) */
+  kachinBaptist: latLngToWorld(25.4001, 97.40655),
+  /** Kachin State Cultural Museum (Google Maps) */
+  culturalMuseum: latLngToWorld(25.39305, 97.40191),
   /** City center (25.3833°N, 97.3964°E) — Myoma market area */
   downtown: latLngToWorld(25.3833, 97.3964),
   // Riverside places are spaced along the play area's north–south extent so they always
@@ -480,9 +481,9 @@ export const DEFAULT_OSM_CITY_SPAWNS: OsmCitySpawnPoint[] = [
   makeSpawn('city_hall', 'မြို့တော်ခန်းမ', 'City Hall', MAP_PLACES.cityHall, 0),
   makeSpawn(
     'city_kachin_baptist',
-    'ကချင်နှစ်ခြင်း အသင်းချုပ် ရပ်ကွက်',
-    'Kachin Baptist Convention Quarter',
-    MAP_PLACES.kbcHeadquarters,
+    'ကချင်ပြည်နယ် ယဉ်ကျေးမှုပြတိုက်',
+    'Kachin State Cultural Museum',
+    MAP_PLACES.culturalMuseum,
     0,
   ),
   makeSpawn('city_strand_road', 'ကမ်းနားလမ်း (ဧရာဝတီ)', 'Strand Road Riverside', MAP_PLACES.strandNorth, 0),
@@ -771,18 +772,18 @@ const OPTION_OVERRIDES: Record<string, Partial<NpcDialogueOption>> = {
       'ကမ်းနားလမ်း မြောက်ပိုင်း ငါးမျှားဆိပ်မှာ ငါးမျှားတံ Lv.2 / Lv.3 နဲ့ မျှားရင် တစ်ကောင် 50,000 MMK ကျော်တန်တဲ့ ငါးကြီးတွေ မိနိုင်တယ်ဗျ!',
   },
   opt_southeast_town: {
-    labelMm: '⛪ ကချင်နှစ်ခြင်း အသင်းချုပ် ရပ်ကွက်က ဘယ်မှာလဲ?',
-    responseMm: 'မြို့တောင်ပိုင်းမှာ ကချင်နှစ်ခြင်း အသင်းချုပ်နဲ့ ဘုရားကျောင်းတွေ စုနေတယ်။ GPS မှတ်ပေးလိုက်မယ်နော်။',
-    targetX: MAP_PLACES.kbcHeadquarters.x,
-    targetZ: MAP_PLACES.kbcHeadquarters.z,
-    targetLabelMm: 'ကချင်နှစ်ခြင်း အသင်းချုပ်',
+    labelMm: '🏛️ ကချင်ပြည်နယ် ယဉ်ကျေးမှုပြတိုက်က ဘယ်မှာလဲ?',
+    responseMm: 'ကချင်ပြည်နယ် ယဉ်ကျေးမှုပြတိုက်မှာ ကချင်ရိုးရာ ဝတ်စုံတွေ၊ လက်မှုပစ္စည်းတွေ ကြည့်လို့ရတယ်။ GPS မှတ်ပေးလိုက်မယ်နော်။',
+    targetX: MAP_PLACES.culturalMuseum.x,
+    targetZ: MAP_PLACES.culturalMuseum.z,
+    targetLabelMm: 'ကချင်ပြည်နယ် ယဉ်ကျေးမှုပြတိုက်',
   },
   opt_college_gps: {
-    labelMm: '🛕 ဝန်းသို ဘုန်းကြီးကျောင်းတိုက်သို့ ညွှန်ပေးပါ',
-    responseMm: 'ဝန်းသို ကျောင်းတိုက်ဆီ GPS မှတ်ပေးလိုက်ပါပြီရှင်!',
-    targetX: MAP_PLACES.wunthoMonastery.x,
-    targetZ: MAP_PLACES.wunthoMonastery.z,
-    targetLabelMm: 'ဝန်းသို ကျောင်းတိုက်',
+    labelMm: '⛪ မနောကွင်းတောင်ဘက်က ဘုရားကျောင်းသို့ ညွှန်ပေးပါ',
+    responseMm: 'မနောကွင်း တောင်ဘက်က ဘုရားကျောင်းဆီ GPS မှတ်ပေးလိုက်ပါပြီရှင်!',
+    targetX: MAP_PLACES.kachinBaptist.x,
+    targetZ: MAP_PLACES.kachinBaptist.z,
+    targetLabelMm: 'Lyon Memorial Baptist Church',
   },
 };
 
@@ -882,11 +883,11 @@ export const MYITKYINA_LANDMARKS: LandmarkInfo[] = [
   ),
   makeLandmarkAt(
     'kachin_baptist',
-    'ကချင်နှစ်ခြင်း အသင်းချုပ်',
-    'Kachin Baptist Convention',
-    'မြို့တောင်ပိုင်း',
-    'KBC headquarters & churches',
-    MAP_PLACES.kbcHeadquarters,
+    'ကချင်ပြည်နယ် ယဉ်ကျေးမှုပြတိုက်',
+    'Kachin State Cultural Museum',
+    'မြို့လယ် မြောက်ပိုင်း',
+    'Kachin history, costumes & crafts',
+    MAP_PLACES.culturalMuseum,
     110,
     '#A855F7',
   ),
@@ -1175,7 +1176,7 @@ const FAMOUS_PLACEMENT: Record<
   bldg_sitapu_weaving: { near: { x: MAP_PLACES.railwayStation.x + (300), z: MAP_PLACES.railwayStation.z + (300) } },
   bldg_sitapu_baptist: {
     near: { x: MAP_PLACES.kachinBaptist.x - 60, z: MAP_PLACES.kachinBaptist.z },
-    quarterMm: 'ကချင်နှစ်ခြင်း အသင်းချုပ် ရပ်ကွက်',
+    quarterMm: 'မနောကွင်း တောင်ဘက်',
   },
   // Myitkyina University is outside the 3 km play area
   bldg_university_hall: null,
@@ -1315,19 +1316,6 @@ export const INITIAL_QUESTS: QuestObjective[] = [
     completed: false,
   },
   {
-    id: 'quest_manau',
-    titleMm: 'မနောတိုင် စည်တော် (၄) ခု တီးခတ်ပါ',
-    titleEn: 'Awaken the 4 Sacred Manau Drums',
-    descriptionMm: 'မနောကွင်းကြီးရှိ မနောတိုင်စည်တော် (၄) ခုအနီး သွားပြီး E နှိပ်၍ မနောပွဲတော် စတင်ပါ',
-    targetRegion: 'manau_park',
-    targetX: 0,
-    targetZ: 0,
-    progress: 0,
-    goal: 4,
-    rewardJade: 25000,
-    completed: false,
-  },
-  {
     // id kept from the old bridge quest so existing saves carry over
     id: 'quest_bridge',
     titleMm: 'ကမ်းနားလမ်း ဧရာဝတီကမ်းစပ် ဂိတ် (၃) ခု ဖြတ်သန်းပါ',
@@ -1359,7 +1347,7 @@ export const INITIAL_QUESTS: QuestObjective[] = [
     titleMm: 'မြစ်ကြီးနား မြို့ပတ်ခရီး — နာမည်ကြီးနေရာ (၄) ခု လည်ပတ်ပါ',
     titleEn: 'Myitkyina City Tour — Visit 4 Famous Landmarks',
     descriptionMm:
-      'မီးရထားဘူတာ → မြို့မဈေး → ဆုတောင်းပြည့်စေတီ ကမ်းနား → ကချင်နှစ်ခြင်း အသင်းချုပ် အစဉ်လိုက် သွားရောက်လည်ပတ်ပါ (GPS လမ်းညွှန်အတိုင်း)',
+      'မီးရထားဘူတာ → မြို့မဈေး → ဆုတောင်းပြည့်စေတီ ကမ်းနား → ကချင်ပြည်နယ် ယဉ်ကျေးမှုပြတိုက် အစဉ်လိုက် သွားရောက်လည်ပတ်ပါ (GPS လမ်းညွှန်အတိုင်း)',
     targetRegion: 'railway_station',
     targetX: 0,
     targetZ: 0,

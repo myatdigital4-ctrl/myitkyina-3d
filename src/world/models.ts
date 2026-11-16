@@ -18,7 +18,25 @@ import {
   waterSignedDistance,
 } from './terrain';
 import { OPEN_LOTS, WORLD_BOUNDS, WORLD_CENTER } from './mapData.generated';
-import { buildManauGate, buildManauGroundDressing, buildShadung } from './manauPark';
+import { asphaltDetailTexture, grassDetailTexture, planarUV } from './textures';
+import {
+  buildBrickWall,
+  buildCircleRailing,
+  buildFloodlightMast,
+  buildManauGate,
+  buildManauGroundDressing,
+  buildKachinLonghouse,
+  buildRedRoofHouse,
+  buildViewingPavilion,
+  MANAU_GATE,
+  MANAU_SPOKE_ANGLES,
+  MANAU_WALL_LOOP,
+  buildManauParkGrounds,
+  buildShadung,
+  createRainTreeGeometries,
+  MANAU_PAVED_RADIUS,
+  MANAU_RING_OUTER,
+} from './manauPark';
 import { nearestStreetPoint, relocateLegacy, reserveLot } from './worldLayout';
 
 // 1. CONTINUOUS 20KM-SCALE SITAPU QUARTER TERRAIN MESH WITH NATURAL ALLUVIAL VERTEX COLORS
@@ -38,7 +56,7 @@ export function createMyitkyinaTerrainMesh(): THREE.Mesh {
   const colSandBank = new THREE.Color('#dfbe8a');
   const colGrassLow = new THREE.Color('#34743f');
   const colGrassHigh = new THREE.Color('#255c30');
-  const colManauTile = new THREE.Color('#6e716c');
+  const colManauTile = new THREE.Color('#8f8e86');
   const colRock = new THREE.Color('#57534e');
   const colSnowPeak = new THREE.Color('#cbd5e1');
 
@@ -74,10 +92,15 @@ export function createMyitkyinaTerrainMesh(): THREE.Mesh {
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.computeVertexNormals();
 
+  // Grass blades / clumps as a detail map over the vertex colors, ~4 m per tile
+  const grassTex = grassDetailTexture();
+  grassTex.repeat.set(size / 4, size / 4);
   const mat = new THREE.MeshStandardMaterial({
     vertexColors: true,
-    roughness: 0.88,
-    metalness: 0.04,
+    map: grassTex,
+    roughness: 0.92,
+    metalness: 0.02,
+    envMapIntensity: 0.4,
   });
 
   const mesh = new THREE.Mesh(geo, mat);
@@ -136,7 +159,7 @@ export function createAyeyarwadyWaterMesh(
 }
 
 /** Radius of the paved Manau dance ground (m) */
-export const MANAU_GROUND_RADIUS = 54;
+export const MANAU_GROUND_RADIUS = MANAU_RING_OUTER; // paved circle + ring road
 
 // 1. SITAPU MANAU PARK (စီတာပူ မနောကွင်း — 25.4019°N, 97.4056°E -> Center x = 0, z = 0)
 export interface ManauDrumNode {
@@ -158,37 +181,97 @@ export function createManauParkComplex(
   group.position.set(cx, baseY, cz);
 
   // Large grey paved dance ground (as in the reference photos)
+  const groundGeo = new THREE.CylinderGeometry(MANAU_PAVED_RADIUS, MANAU_PAVED_RADIUS + 0.4, 0.16, 96);
+  planarUV(groundGeo, 3);
   const ground = new THREE.Mesh(
-    new THREE.CylinderGeometry(MANAU_GROUND_RADIUS, MANAU_GROUND_RADIUS + 0.6, 0.16, 96),
-    new THREE.MeshStandardMaterial({ color: '#6e716c', roughness: 0.95, metalness: 0.02, envMapIntensity: 0.3 }),
+    groundGeo,
+    new THREE.MeshStandardMaterial({ color: '#4a4c49', map: asphaltDetailTexture(), roughness: 0.97, metalness: 0.02, envMapIntensity: 0.25 }),
   );
   ground.position.y = 0.08;
   ground.receiveShadow = true;
   group.add(ground);
 
   // Manau poles on their platform, facing south (+z) toward the main approach
+  // Pole base sits at the circle center; on the 19z satellite its long axis runs WSW–ENE
+  // (~24° north of east), and the 360° photo shows the emblem side facing north.
+  const polesAt = { x: 0, z: 3 };
   const shadung = buildShadung(renderer);
-  shadung.position.set(0, 0.16, -8);
+  shadung.position.set(polesAt.x, 0.16, polesAt.z);
+  shadung.rotation.y = Math.PI + 0.42;
   group.add(shadung);
-  group.add(buildManauGroundDressing(MANAU_GROUND_RADIUS - 2, 21));
+  group.add(buildManauGroundDressing(MANAU_PAVED_RADIUS - 1.5, 21, polesAt, { x: -20, z: 16 }));
+  group.add(buildCircleRailing(MANAU_PAVED_RADIUS, MANAU_SPOKE_ANGLES, 0.16));
 
-  // Entrance gate on the edge of the ground, facing the nearest street
-  const street = nearestStreetPoint(0, 0);
-  const gdir = Math.atan2(street.x, street.z);
+  // Floodlights: a tall mast in the west field and a pole by the railing to the north-east
+  const mastW = buildFloodlightMast(26);
+  mastW.position.set(-58, groundHeightAt(cx - 58, cz - 6) - baseY, -6);
+  group.add(mastW);
+  const poleNE = buildFloodlightMast(12);
+  poleNE.position.set(30, 0, -32);
+  group.add(poleNE);
+
+  // Buildings north of the circle, modeled from the 360° photo
+  const pavilion360 = buildViewingPavilion(28, 20); // 19z satellite: ~30 × 21 m
+  pavilion360.position.set(-7, groundHeightAt(cx - 7, cz - 89) - baseY, -89);
+  group.add(pavilion360);
+  // Kachin longhouse NW of the circle: ~44 × 10 m, long axis ~20° off north (satellite)
+  const longhouse = buildKachinLonghouse(42, 10);
+  longhouse.position.set(-52, groundHeightAt(cx - 52, cz - 93) - baseY, -93);
+  longhouse.rotation.y = 0.36;
+  group.add(longhouse);
+
+  const redHouse = buildRedRoofHouse(23, 16);
+  redHouse.position.set(16, groundHeightAt(cx + 16, cz - 83) - baseY, -83);
+  group.add(redHouse);
+  // Ring road, eight paths, rain trees and the bronze statue (relative to the circle center)
+  const grounds = buildManauParkGrounds((x, z) => groundHeightAt(cx + x, cz + z) - baseY);
+  group.add(grounds);
+
+  // Main entrance gate at the west end of the west path, facing out toward the street
   const gate = buildManauGate(renderer);
-  gate.position.set(Math.sin(gdir) * (MANAU_GROUND_RADIUS + 3), 0.1, Math.cos(gdir) * (MANAU_GROUND_RADIUS + 3));
-  gate.rotation.y = gdir;
+  gate.position.set(MANAU_GATE.x, groundHeightAt(cx + MANAU_GATE.x, cz + MANAU_GATE.z) - baseY, MANAU_GATE.z);
+  gate.rotation.y = MANAU_GATE.facing;
   group.add(gate);
+  // Where real streets / paths cross the wall line, the wall must open (player screenshots)
+  const crossings: { x: number; z: number }[] = [];
+  for (let i = 0; i < MANAU_WALL_LOOP.length - 1; i++) {
+    const [ax, az] = MANAU_WALL_LOOP[i];
+    const [bx, bz] = MANAU_WALL_LOOP[i + 1];
+    for (const r of MYITKYINA_ROAD_SEGMENTS) {
+      const x1 = r.x1 - cx, z1 = r.z1 - cz, x2 = r.x2 - cx, z2 = r.z2 - cz;
+      const d = (bx - ax) * (z2 - z1) - (bz - az) * (x2 - x1);
+      if (Math.abs(d) < 1e-6) continue;
+      const t = ((x1 - ax) * (z2 - z1) - (z1 - az) * (x2 - x1)) / d;
+      const u = ((x1 - ax) * (bz - az) - (z1 - az) * (bx - ax)) / d;
+      if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+        const p = { x: ax + (bx - ax) * t, z: az + (bz - az) * t };
+        if (crossings.every((c) => Math.hypot(c.x - p.x, c.z - p.z) > 6)) crossings.push(p);
+      }
+    }
+  }
+  // Second tusk gate on the north side: the crossing nearest where the player reported it
+  const northGateAt = crossings.length
+    ? crossings.reduce((a, b) => (Math.hypot(a.x - 18, a.z + 123) < Math.hypot(b.x - 18, b.z + 123) ? a : b))
+    : { x: -4, z: -109 };
+  const northGate = buildManauGate(renderer);
+  northGate.position.set(northGateAt.x, groundHeightAt(cx + northGateAt.x, cz + northGateAt.z) - baseY, northGateAt.z);
+  northGate.rotation.y = Math.atan2(northGateAt.x, northGateAt.z);
+  group.add(northGate);
+
+  // Red brick perimeter wall around the park, open at both gates and every street crossing
+  group.add(
+    buildBrickWall(MANAU_WALL_LOOP, (x, z) => groundHeightAt(cx + x, cz + z) - baseY, [
+      { ...MANAU_GATE, half: 7 },
+      { ...northGateAt, half: 7 },
+      ...crossings.map((c) => ({ ...c, half: 4 })),
+    ]),
+  );
 
   const goldMat = new THREE.MeshStandardMaterial({ color: '#f59e0b', roughness: 0.24, metalness: 0.82 });
 
   // 4 Interactive Sacred Manau Drums around the spacious plaza for Quest 1
-  const drumOffsets = [
-    { id: 'drum_ne', dx: 17.5, dz: -10.5 },
-    { id: 'drum_nw', dx: -17.5, dz: -10.5 },
-    { id: 'drum_se', dx: 17.5, dz: 13.5 },
-    { id: 'drum_sw', dx: -17.5, dz: 13.5 },
-  ];
+  // The four interactive drums were removed (not part of the real park)
+  const drumOffsets: { id: string; dx: number; dz: number }[] = [];
 
   const drums: ManauDrumNode[] = [];
   const woodMat = new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.65, metalness: 0.1 });
@@ -1554,15 +1637,14 @@ export function createSmugglerEnemies(): SmugglerEnemy[] {
 // 10. MINI-3D LAYERED TREES (သစ်ပင်များ) & RIVER ROCKS (THREE.InstancedMesh) ACROSS SPACIOUS SITAPU
 export function createInstancedFoliageAndRocks(scene: THREE.Scene) {
   const treeCount = 1400;
-  const trunkGeo = new THREE.CylinderGeometry(0.26, 0.42, 2.4, 8);
-  trunkGeo.translate(0, 1.2, 0);
-  const trunkMat = new THREE.MeshStandardMaterial({ color: '#6b4423', roughness: 0.88 });
-
-  const canopyBottomGeo = new THREE.ConeGeometry(2.3, 3.5, 8);
-  canopyBottomGeo.translate(0, 3.4, 0);
-  const canopyTopGeo = new THREE.ConeGeometry(1.7, 3.0, 8);
-  canopyTopGeo.translate(0, 5.3, 0);
-  const canopyMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.72 });
+  // Broad tropical canopies (rain trees, mango, tamarind) rather than conifers
+  const rain = createRainTreeGeometries();
+  const trunkGeo = rain.trunk;
+  const trunkMat = new THREE.MeshStandardMaterial({ color: '#5b4636', roughness: 0.9 });
+  const canopyBottomGeo = rain.canopy;
+  // A small second layer keeps the old two-mesh setup; scaled to nothing visible
+  const canopyTopGeo = new THREE.IcosahedronGeometry(0.01, 0);
+  const canopyMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85, flatShading: true });
 
   const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, treeCount);
   const canopyBottomInst = new THREE.InstancedMesh(canopyBottomGeo, canopyMat, treeCount);
@@ -1575,7 +1657,7 @@ export function createInstancedFoliageAndRocks(scene: THREE.Scene) {
 
   const dummy = new THREE.Object3D();
   const color = new THREE.Color();
-  const foliagePalette = ['#16a34a', '#15803d', '#22c55e', '#059669', '#65a30d'];
+  const foliagePalette = ['#3f6b2a', '#4a7a30', '#355e26', '#56823a', '#5f7f35'];
 
   let placed = 0;
   let attempts = 0;
@@ -1611,7 +1693,7 @@ export function createInstancedFoliageAndRocks(scene: THREE.Scene) {
     }
 
     const y = groundHeightAt(x, z);
-    const scale = isSitapuTree ? 0.72 + rand() * 0.32 : 0.88 + rand() * 0.45;
+    const scale = isSitapuTree ? 0.5 + rand() * 0.25 : 0.6 + rand() * 0.35;
     dummy.position.set(x, y, z);
     dummy.rotation.set(0, rand() * Math.PI * 2, 0);
     dummy.scale.set(scale, scale * (0.92 + rand() * 0.22), scale);

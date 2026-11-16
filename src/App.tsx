@@ -33,7 +33,7 @@ const INITIAL_HUD: HUDState = {
   cameraYaw: Math.PI,
   waypointX: 0,
   waypointZ: 0,
-  waypointLabelMm: 'စီတာပူ မနောတိုင် စည်တော် (၄) ခု တီးခတ်ပါ',
+  waypointLabelMm: 'ငါးမျှားတံဝယ်ပြီး ဧရာဝတီကမ်းနားတွင် ငါးဖမ်းပါ',
   quests: INITIAL_QUESTS,
   activeQuestIndex: 0,
   enemiesRemaining: 8,

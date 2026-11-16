@@ -1326,7 +1326,7 @@ export function createArcadeBoostRingsAndChests(): {
     }),
     [MAP_PLACES.pagodaJetty.x - 30, MAP_PLACES.pagodaJetty.z + 18], // Pagoda courtyard
     [MAP_PLACES.strandNorth.x - 12, MAP_PLACES.strandNorth.z + 40], // Strand Road riverside
-    [MAP_PLACES.kbcHeadquarters.x, MAP_PLACES.kbcHeadquarters.z + 25], // Kachin Baptist quarter
+    [MAP_PLACES.culturalMuseum.x, MAP_PLACES.culturalMuseum.z + 25], // Cultural museum
   ];
 
   const chestBoxMat = new THREE.MeshStandardMaterial({

@@ -29,23 +29,26 @@ const M_PER_LAT = 110950;
 const M_PER_LNG = 111320 * Math.cos((C.lat * Math.PI) / 180);
 const toC = (lat, lng) => ({ x: (lng - C.lng) * M_PER_LNG, z: (lat - C.lat) * -M_PER_LAT });
 
-// Play area relative to C (3 km × 3 km, shifted east so the Ayeyarwady is inside)
-const AREA = { minX: -1200, maxX: 1800, minZ: -1500, maxZ: 1500 };
+// Play area relative to C (3 km × 3 km): from the railway station (south edge) north to
+// the Kachin National Manau Park, with the Ayeyarwady on the east side.
+const AREA = { minX: -1200, maxX: 1800, minZ: -2885, maxZ: 115 };
 
-// Ayeyarwady centerline, estimated from where the city's streets and buildings stop
-// on the west bank and resume on the east bank (C-relative meters).
-const RIVER_C = [
-  { z: -2200, cx: 1200, hw: 240 },
-  { z: -1000, cx: 1200, hw: 250 },
-  { z: -500, cx: 1220, hw: 280 },
-  { z: -200, cx: 1360, hw: 250 },
-  { z: 0, cx: 1500, hw: 230 },
-  { z: 200, cx: 1490, hw: 220 },
-  { z: 400, cx: 1600, hw: 230 },
-  { z: 700, cx: 1800, hw: 240 },
-  { z: 1000, cx: 2000, hw: 250 },
-  { z: 2200, cx: 2300, hw: 250 },
+// Ayeyarwady west channel, traced from Google satellite imagery: `west` is the city-side
+// bank, `east` where the big sandbar island starts (or open water in the north).
+// C-relative meters; z grows southward.
+const RIVER_BANKS = [
+  { z: -3500, west: 1720, east: 2320 },
+  { z: -2884, west: 1688, east: 2288 },
+  { z: -2431, west: 1527, east: 2127 },
+  { z: -1978, west: 1268, east: 1850 },
+  { z: -1720, west: 1171, east: 1559 },
+  { z: -1331, west: 1009, east: 1313 },
+  { z: -685, west: 925, east: 1268 },
+  { z: -38, west: 920, east: 1300 },
+  { z: 480, west: 1074, east: 1430 },
+  { z: 1500, west: 1150, east: 1500 },
 ];
+const RIVER_C = RIVER_BANKS.map((b) => ({ z: b.z, cx: (b.west + b.east) / 2, hw: (b.east - b.west) / 2 }));
 function riverAt(z, pts) {
   if (z <= pts[0].z) return pts[0];
   for (let i = 0; i < pts.length - 1; i++) {
@@ -129,32 +132,9 @@ if (fs.existsSync(MS_DIR)) {
   }
 }
 
-// --- Pick an open spot for the Manau plaza ----------------------------------
-// Needs ~70 m of clear ground; prefer near the middle of town, away from the river.
-const ptGrid = makeGrid(60);
-for (const f of [...feats, ...msFeats])
-  for (const [g, a] of ringOf(f)) {
-    const p = toC(a, g);
-    ptGrid.add(p, p.x, p.z, p.x, p.z);
-  }
-let manau = null;
-for (let x = -900; x <= 700; x += 20) {
-  for (let z = -1100; z <= 1100; z += 20) {
-    if (waterDistC(x, z) < 350) continue;
-    let near = 0;
-    let minD = Infinity;
-    for (const p of ptGrid.near(x, z, 120)) {
-      const d = Math.hypot(p.x - x, p.z - z);
-      if (d < 60) near++;
-      if (d < minD) minD = d;
-    }
-    if (near > 0) continue;
-    // Clear spot that still sits in town (something within ~110 m) and near the center
-    const score = minD < 110 ? Math.hypot(x - 100, z) : Infinity;
-    if (!manau || score < manau.score) manau = { x, z, score, minD };
-  }
-}
-if (!manau || !Number.isFinite(manau.score)) throw new Error('No open plaza spot found');
+// --- Manau plaza: center of the real dance circle (Google satellite) ---------
+const MANAU_LATLNG = { lat: 25.401888, lng: 97.405819 };
+const manau = { ...toC(MANAU_LATLNG.lat, MANAU_LATLNG.lng), minD: 0 };
 const ORIGIN = {
   lat: C.lat - manau.z / M_PER_LAT,
   lng: C.lng + manau.x / M_PER_LNG,
@@ -166,7 +146,7 @@ const toWorld = (lat, lng) => {
 const cToWorld = (p) => ({ x: p.x - manau.x, z: p.z - manau.z });
 
 // --- Clip features ----------------------------------------------------------
-const PLAZA_CLEAR = 60;
+const PLAZA_CLEAR = 50; // dance circle + ring road (radius ~48 m)
 const kept = [];
 for (const f of feats) {
   const p = f.properties;
@@ -329,8 +309,16 @@ let msOnRoad = 0;
     const zs = b.poly.map((q) => q.z);
     osmGrid.add(b, Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs));
   }
+  // Park buildings modeled by hand from photos (world meters from the circle center)
+  const PARK_CUSTOM = [
+    [-7, -89], // open viewing pavilion
+    [16, -83], // two-storey white building with red roof
+    [-46, -91], // Kachin traditional longhouse (dark steep roof)
+  ];
   for (const f of msFeats) {
     const cC = centroidC(f);
+    const cw = cToWorld(cC);
+    if (PARK_CUSTOM.some(([px, pz]) => Math.hypot(cw.x - px, cw.z - pz) < 9)) continue;
     if (!inArea(cC)) continue;
     if (waterDistC(cC.x, cC.z) < 5) continue;
     const c = cToWorld(cC);
@@ -511,7 +499,7 @@ fs.writeFileSync(OUT_TS, ts);
 
 const nb = kept.filter((f) => f.properties.building).length;
 const nr = kept.filter((f) => f.properties.highway).length;
-console.log(`origin (Manau plaza): ${ORIGIN.lat.toFixed(6)}, ${ORIGIN.lng.toFixed(6)}  (C-rel ${manau.x}, ${manau.z}; nearest feature ${manau.minD.toFixed(0)} m)`);
+console.log(`origin (Manau plaza): ${ORIGIN.lat.toFixed(6)}, ${ORIGIN.lng.toFixed(6)}  (C-rel ${Math.round(manau.x)}, ${Math.round(manau.z)})`);
 console.log(`bounds: x ${Math.round(b0.x)}..${Math.round(b1.x)}  z ${Math.round(b0.z)}..${Math.round(b1.z)}`);
 console.log(`kept ${nb} buildings, ${nr} road pieces -> ${segs.length} road segments, ${places.length} named places`);
 console.log(`microsoft footprints: +${msAdded} added, ${msDup} duplicates of OSM, ${msOnRoad} on streets`);

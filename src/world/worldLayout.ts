@@ -110,3 +110,26 @@ export function relocateLegacy(x: number, z: number, mainOnly = true) {
   const p = nearestStreetPoint(c.x, c.z, mainOnly);
   return { x: Math.round(p.x * 10) / 10, z: Math.round(p.z * 10) / 10, heading: p.heading };
 }
+
+/**
+ * Parking spots on the street itself: along the nearest street to (x, z), in the right-hand
+ * lane at the curb, spaced `spacing` meters apart, each facing along the road.
+ */
+export function curbsideSpots(x: number, z: number, count: number, spacing = 7) {
+  const p = nearestStreetPoint(x, z);
+  const seg = OSM_ROAD_SEGMENTS[p.segIndex];
+  const half = seg ? seg.width / 2 : 3;
+  const off = Math.max(1.2, half - 1.3); // just inside the curb
+  const dx = Math.sin(p.heading);
+  const dz = Math.cos(p.heading);
+  const spots: { x: number; z: number; heading: number }[] = [];
+  for (let i = 0; i < count; i++) {
+    const t = (i - (count - 1) / 2) * spacing;
+    spots.push({
+      x: Math.round((p.x + dx * t + dz * off) * 10) / 10,
+      z: Math.round((p.z + dz * t - dx * off) * 10) / 10,
+      heading: p.heading,
+    });
+  }
+  return spots;
+}

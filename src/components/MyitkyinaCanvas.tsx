@@ -4,6 +4,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MusicTrackId, soundEngine } from '../audio/soundEngine';
 import { getSettings, onSettingsChanged, QUALITY_PROFILES } from '../settings/gameSettings';
 import { WORLD_BOUNDS } from '../world/mapData.generated';
+import { curbsideSpots, nearestStreetPoint } from '../world/worldLayout';
 import {
   AUTOSAVE_INTERVAL_MS,
   GameSaveData,
@@ -582,17 +583,23 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
     scene.add(gpsGroup);
 
     // Vehicles in the world (Parked cleanly along Sitapu curbs and driveways, never inside buildings)
+    // Out past the gate (same direction as the nearest street), so they park on a city street
+    const gateDir = nearestStreetPoint(0, 0);
+    const gateLen = Math.hypot(gateDir.x, gateDir.z) || 1;
+    const parkSpots = curbsideSpots((gateDir.x / gateLen) * 110, (gateDir.z / gateLen) * 110, 4, 7);
+    const riversideSpot = curbsideSpots(FISHING_SPOTS[0].x, FISHING_SPOTS[0].z, 1)[0];
     const vehicles: WorldVehicle[] = [
-      createPlayableVehicle('veh_ebike_a5pro', 'ebike', 5, 34, Math.PI, isSoftwareGl),
-      createPlayableVehicle('veh_ebike_aimaone', 'ebike', -6, 52, Math.PI, isSoftwareGl),
-      createPlayableVehicle('veh_hilux_manau', 'hilux4x4', -24, 24, Math.PI, isSoftwareGl),
-      createPlayableVehicle('veh_tuktuk_market', 'tuktuk', -62, 58, Math.PI, isSoftwareGl),
+      // Parked on the street by the Manau park, not on the dance ground
+      createPlayableVehicle('veh_ebike_a5pro', 'ebike', parkSpots[0].x, parkSpots[0].z, parkSpots[0].heading, isSoftwareGl),
+      createPlayableVehicle('veh_ebike_aimaone', 'ebike', parkSpots[1].x, parkSpots[1].z, parkSpots[1].heading, isSoftwareGl),
+      createPlayableVehicle('veh_hilux_manau', 'hilux4x4', parkSpots[2].x, parkSpots[2].z, parkSpots[2].heading, isSoftwareGl),
+      createPlayableVehicle('veh_tuktuk_market', 'tuktuk', parkSpots[3].x, parkSpots[3].z, parkSpots[3].heading, isSoftwareGl),
       createPlayableVehicle(
         'veh_hilux_bridge',
         'hilux4x4',
-        FISHING_SPOTS[0].x - 14,
-        FISHING_SPOTS[0].z,
-        Math.PI,
+        riversideSpot.x,
+        riversideSpot.z,
+        riversideSpot.heading,
         isSoftwareGl,
       ),
       createPlayableVehicle(

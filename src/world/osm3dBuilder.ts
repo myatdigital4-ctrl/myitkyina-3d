@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { asphaltDetailTexture, concreteDetailTexture } from './textures';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   DEFAULT_OSM_CITY_SPAWNS,
@@ -474,6 +475,8 @@ export function buildMyitkyinaOsm3DGroup(
     greenZinc: [],
     goldCivic: [],
     darkSlate: [],
+    lightZinc: [],
+    maroonZinc: [],
   };
 
   const roadTrunkGeos: THREE.BufferGeometry[] = [];
@@ -806,14 +809,34 @@ export function buildMyitkyinaOsm3DGroup(
           'residentialWarm',
           'residentialBrick',
         ];
+        // Weighted like Myitkyina satellite imagery: mostly rust-red/brown and grey zinc,
+        // a few blue, rarely green
         const roofChoices: (keyof typeof roofBuckets)[] = [
-          'redZinc',
+          'redZinc', 'redZinc', 'redZinc', 'redZinc', 'redZinc',
+          'lightZinc', 'lightZinc', 'lightZinc',
+          'darkSlate', 'darkSlate',
           'blueZinc',
           'greenZinc',
-          'darkSlate',
         ];
         wallKey = wallChoices[hash % wallChoices.length];
         roofKey = roofChoices[(hash >> 2) % roofChoices.length];
+      }
+
+      // Park buildings matched to the 19z Google satellite (world meters from the circle center)
+      const PARK_ROOFS: [number, number, keyof typeof roofBuckets][] = [
+        [-139, 46, 'maroonZinc'], // long hall: white walls, maroon roof (visitor photo)
+        [100, -62, 'redZinc'], // east building
+        [-126, 90, 'redZinc'], // row of red gables south of the hall
+        [-139, 81, 'redZinc'],
+        [-74, -98, 'redZinc'],
+      ];
+      let forcePitched = false;
+      for (const [px, pz, rk] of PARK_ROOFS) {
+        if (Math.hypot(cx - px, cz - pz) < 8) {
+          roofKey = rk;
+          wallKey = 'residentialCream';
+          forcePitched = true;
+        }
       }
 
       // Filter consecutive duplicate vertices (< 0.05 units) and ensure consistent CCW winding
@@ -893,7 +916,7 @@ export function buildMyitkyinaOsm3DGroup(
       const box = orientedBox(cleanLocalPts);
       const footprintArea = Math.abs(signedArea) / 2;
       const fill = footprintArea / Math.max(1, box.L * box.D);
-      const pitched = fill > 0.78 && footprintArea < 650 && height < 10 && box.D > 3;
+      const pitched = forcePitched || (fill > 0.78 && footprintArea < 650 && height < 10 && box.D > 3);
       if (pitched) {
         roofBuckets[roofKey].push(buildPitchedRoof(box, cx, cz, baseY + height, hash % 3 !== 0));
       } else {
@@ -916,6 +939,8 @@ export function buildMyitkyinaOsm3DGroup(
         greenZinc: '#22c55e',
         goldCivic: '#f59e0b',
         darkSlate: '#64748b',
+        lightZinc: '#b9bdbd',
+        maroonZinc: '#7a2e2a',
       };
       // Shop signboard on buildings that front a main street (about half of them)
       if (hash % 2 === 0 && signCount < 2500) {
@@ -1093,7 +1118,9 @@ export function buildMyitkyinaOsm3DGroup(
     blueZinc: new THREE.MeshStandardMaterial({ color: '#4b6f8c', roughness: 0.6, metalness: 0.4, side: THREE.DoubleSide }),
     greenZinc: new THREE.MeshStandardMaterial({ color: '#4f7a5a', roughness: 0.62, metalness: 0.35, side: THREE.DoubleSide }),
     goldCivic: new THREE.MeshStandardMaterial({ color: '#f59e0b', roughness: 0.32, metalness: 0.68, side: THREE.DoubleSide }),
-    darkSlate: new THREE.MeshStandardMaterial({ color: '#8a8f93', roughness: 0.75, metalness: 0.2, side: THREE.DoubleSide }),
+    darkSlate: new THREE.MeshStandardMaterial({ color: '#5f6468', roughness: 0.75, metalness: 0.25, side: THREE.DoubleSide }),
+    lightZinc: new THREE.MeshStandardMaterial({ color: '#b9bdbd', roughness: 0.55, metalness: 0.45, side: THREE.DoubleSide }),
+    maroonZinc: new THREE.MeshStandardMaterial({ color: '#7a2e2a', roughness: 0.6, metalness: 0.3, side: THREE.DoubleSide }),
   };
 
   for (const [key, geos] of Object.entries(roofBuckets)) {
@@ -1120,8 +1147,9 @@ export function buildMyitkyinaOsm3DGroup(
       const trunkMesh = new THREE.Mesh(
         mergedTrunk,
         new THREE.MeshStandardMaterial({
-          color: '#1e293b',
-          roughness: 0.78,
+          color: '#3a3f45',
+          map: asphaltDetailTexture(),
+          roughness: 0.9,
           metalness: 0.1,
           side: THREE.DoubleSide,
           polygonOffset: true,
@@ -1162,9 +1190,14 @@ export function buildMyitkyinaOsm3DGroup(
       const resMesh = new THREE.Mesh(
         mergedRes,
         new THREE.MeshStandardMaterial({
-          color: '#475569',
-          roughness: 0.82,
-          metalness: 0.06,
+          color: '#7d8187',
+          map: (() => {
+            const t = concreteDetailTexture();
+            t.repeat.set(1, 3); // concrete road slabs ~3.3 m
+            return t;
+          })(),
+          roughness: 0.9,
+          metalness: 0.02,
           side: THREE.DoubleSide,
           polygonOffset: true,
           polygonOffsetFactor: -3,
@@ -1185,9 +1218,10 @@ export function buildMyitkyinaOsm3DGroup(
       const svcMesh = new THREE.Mesh(
         mergedSvc,
         new THREE.MeshStandardMaterial({
-          color: '#9a5229',
-          roughness: 0.88,
-          metalness: 0.04,
+          color: '#9a5c37',
+          map: asphaltDetailTexture(),
+          roughness: 0.95,
+          metalness: 0.02,
           side: THREE.DoubleSide,
           polygonOffset: true,
           polygonOffsetFactor: -2,
@@ -1217,7 +1251,12 @@ export function buildMyitkyinaOsm3DGroup(
   addMerged(
     sidewalkGeos,
     new THREE.MeshStandardMaterial({
-      color: '#bdb8ae',
+      color: '#c8c4ba',
+      map: (() => {
+        const t = concreteDetailTexture();
+        t.repeat.set(1, 4); // slabs ~2.5 m along the walk
+        return t;
+      })(),
       roughness: 0.9,
       side: THREE.DoubleSide,
       polygonOffset: true,

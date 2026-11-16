@@ -163,7 +163,7 @@ export function roadSurfaceAt(
 
   // Sitapu Manau Park Circular Ceremonial Ground at (0, 0)
   const dManauPlaza = Math.hypot(x, z);
-  const wManauPlaza = 1 - THREE.MathUtils.smoothstep(dManauPlaza, 52, 58);
+  const wManauPlaza = 1 - THREE.MathUtils.smoothstep(dManauPlaza, 47, 53);
   if (wManauPlaza > bestWeight) {
     bestWeight = wManauPlaza;
     bestSurface = 'concrete';
