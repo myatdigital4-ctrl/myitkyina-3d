@@ -413,6 +413,31 @@ class SoundEngine {
   }
 
   // Jump Sound
+  /** Two-tone scooter horn (beep-beep) */
+  public playHorn() {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    for (const [t, f] of [
+      [0, 420],
+      [0.18, 420],
+    ] as [number, number][]) {
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, now + t);
+      gain.gain.exponentialRampToValueAtTime(0.12, now + t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + t + 0.15);
+      for (const mult of [1, 1.26]) {
+        const osc = ctx.createOscillator();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(f * mult, now + t);
+        osc.connect(gain);
+        osc.start(now + t);
+        osc.stop(now + t + 0.16);
+      }
+      gain.connect(this.sfxBus ?? ctx.destination);
+    }
+  }
+
   public playJump() {
     const ctx = this.ensureContext();
     if (!ctx) return;

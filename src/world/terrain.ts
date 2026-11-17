@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { MYITKYINA_ROAD_SEGMENTS, RoadSurfaceType } from '../types/game';
 import { RIVER_POINTS, WORLD_BOUNDS } from './mapData.generated';
+import { stationPlatformTopAt } from './railwayStation';
+import { sutaungpyaeFloorAt } from './sutaungpyae';
+import { aungMyinTharHeightAt } from './aungMyinThar';
 
 // ============================================================================
 // 1:1 MYITKYINA TERRAIN & AYEYARWADY RIVER (world meters, origin = Manau plaza)
@@ -69,6 +72,9 @@ export function distToSegment(
 }
 
 export function groundHeightAt(x: number, z: number): number {
+  // Aung Myin Thar resort: its own little valley far north of the city map
+  const resort = aungMyinTharHeightAt(x, z);
+  if (resort !== null) return resort;
   const waterDist = waterSignedDistance(x, z);
 
   if (waterDist < 14) {
@@ -92,6 +98,10 @@ export function groundHeightAt(x: number, z: number): number {
 
 export function playableSurfaceHeightAt(x: number, z: number): number {
   const g = groundHeightAt(x, z);
+  const platform = stationPlatformTopAt(x, z, g);
+  if (platform !== null) return platform;
+  const pagodaFloor = sutaungpyaeFloorAt(x, z, g);
+  if (pagodaFloor !== null) return pagodaFloor;
   if (isBridgeDeck(x, z)) {
     return Math.max(g, bridgeDeckHeightAt(x));
   }

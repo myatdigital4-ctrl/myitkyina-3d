@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { asphaltDetailTexture, concreteDetailTexture } from './textures';
+import { createRainTreeGeometries } from './manauPark';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   DEFAULT_OSM_CITY_SPAWNS,
@@ -15,6 +16,7 @@ import {
   distToSegment,
   groundHeightAt,
   waterSignedDistance,
+  roadWeightAt,
 } from './terrain';
 
 interface GeoJsonFeature {
@@ -332,6 +334,222 @@ function createShopSignAtlas(): THREE.CanvasTexture {
 }
 
 /** Smallest-area rectangle around a polygon (local x/y), tested along each edge direction. */
+/**
+ * Compound walls (ခြံစည်းရိုး) around houses, as on Myitkyina residential streets: a low wall
+ * of brick, cream plaster or grey block 1.8 m outside the house, with corner pillars and a gate
+ * gap on the side facing the street. A side is left out where it would run into a road or into
+ * another building.
+ */
+function buildCompoundWalls(
+  houses: { cx: number; cz: number; box: ReturnType<typeof orientedBox>; hash: number }[],
+  all: { cx: number; cz: number; box: ReturnType<typeof orientedBox> }[],
+): { group: THREE.Group; cars: { x: number; z: number }[] } {
+  const root = new THREE.Group();
+  // world point of local (u, v) in a box frame; the shape's local y maps to −z in the world
+  const toWorld = (h: { cx: number; cz: number; box: ReturnType<typeof orientedBox> }, u: number, v: number) => {
+    const c = Math.cos(h.box.angle);
+    const s = Math.sin(h.box.angle);
+    const lx = (h.box.cu + u) * c - (h.box.cv + v) * s;
+    const ly = (h.box.cu + u) * s + (h.box.cv + v) * c;
+    return { x: h.cx + lx, z: h.cz - ly };
+  };
+  const insideBox = (h: { cx: number; cz: number; box: ReturnType<typeof orientedBox> }, x: number, z: number, pad: number) => {
+    const lx = x - h.cx;
+    const ly = -(z - h.cz);
+    const c = Math.cos(h.box.angle);
+    const s = Math.sin(h.box.angle);
+    const u = lx * c + ly * s - h.box.cu;
+    const v = -lx * s + ly * c - h.box.cv;
+    return Math.abs(u) < h.box.L / 2 + pad && Math.abs(v) < h.box.D / 2 + pad;
+  };
+  // spatial hash of buildings
+  const cell = 40;
+  const grid = new Map<string, number[]>();
+  all.forEach((b, i) => {
+    const k = `${Math.floor(b.cx / cell)},${Math.floor(b.cz / cell)}`;
+    let arr = grid.get(k);
+    if (!arr) grid.set(k, (arr = []));
+    arr.push(i);
+  });
+  const near = (x: number, z: number) => {
+    const out: number[] = [];
+    const gx = Math.floor(x / cell);
+    const gz = Math.floor(z / cell);
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) out.push(...(grid.get(`${gx + i},${gz + j}`) ?? []));
+    return out;
+  };
+
+  const segs: { x1: number; z1: number; x2: number; z2: number; color: number }[] = [];
+  const posts: { x: number; z: number; color: number }[] = [];
+  const yardTrees: { x: number; z: number; s: number; rot: number }[] = [];
+  const cars: { x: number; z: number; heading: number; color: number }[] = [];
+  const M = 1.8;
+  for (const h of houses) {
+    const hu = h.box.L / 2 + M;
+    const hv = h.box.D / 2 + M;
+    const corners = [
+      toWorld(h, -hu, -hv),
+      toWorld(h, hu, -hv),
+      toWorld(h, hu, hv),
+      toWorld(h, -hu, hv),
+    ];
+    // side whose midpoint is closest to a road gets the gate
+    let gateSide = 0;
+    let bestRoad = -1;
+    for (let k = 0; k < 4; k++) {
+      const a = corners[k];
+      const b = corners[(k + 1) % 4];
+      const mx = (a.x + b.x) / 2;
+      const mz = (a.z + b.z) / 2;
+      const w = roadWeightAt(mx + (mx - h.cx) * 0.4, mz + (mz - h.cz) * 0.4);
+      if (w > bestRoad) {
+        bestRoad = w;
+        gateSide = k;
+      }
+    }
+    const color = h.hash % 3;
+    const others = near(h.cx, h.cz).map((i) => all[i]).filter((b) => b.cx !== h.cx || b.cz !== h.cz);
+    for (let k = 0; k < 4; k++) {
+      const a = corners[k];
+      const b = corners[(k + 1) % 4];
+      let blocked = false;
+      for (const t of [0.15, 0.5, 0.85]) {
+        const x = a.x + (b.x - a.x) * t;
+        const z = a.z + (b.z - a.z) * t;
+        if (roadWeightAt(x, z) > 0.02 || others.some((o) => insideBox(o, x, z, 0.4))) {
+          blocked = true;
+          break;
+        }
+      }
+      if (blocked) continue;
+      if (k === gateSide) {
+        const len = Math.hypot(b.x - a.x, b.z - a.z);
+        // Every few houses a car is parked on the street in front of the gate
+        if (h.hash % 4 === 0) {
+          const mx = (a.x + b.x) / 2;
+          const mz = (a.z + b.z) / 2;
+          const ox = mx - h.cx;
+          const oz = mz - h.cz;
+          const ol = Math.hypot(ox, oz) || 1;
+          const px = mx + (ox / ol) * 2.6;
+          const pz = mz + (oz / ol) * 2.6;
+          if (roadWeightAt(px, pz) < 0.85 && !others.some((o) => insideBox(o, px, pz, 1.5))) {
+            cars.push({ x: px, z: pz, heading: Math.atan2(b.x - a.x, b.z - a.z), color: (h.hash >> 3) % 6 });
+          }
+        }
+        const gap = Math.min(3.2, len * 0.4) / len;
+        segs.push({ x1: a.x, z1: a.z, x2: a.x + (b.x - a.x) * (0.5 - gap / 2), z2: a.z + (b.z - a.z) * (0.5 - gap / 2), color });
+        segs.push({ x1: a.x + (b.x - a.x) * (0.5 + gap / 2), z1: a.z + (b.z - a.z) * (0.5 + gap / 2), x2: b.x, z2: b.z, color });
+        posts.push({ x: a.x + (b.x - a.x) * (0.5 - gap / 2), z: a.z + (b.z - a.z) * (0.5 - gap / 2), color });
+        posts.push({ x: a.x + (b.x - a.x) * (0.5 + gap / 2), z: a.z + (b.z - a.z) * (0.5 + gap / 2), color });
+      } else {
+        segs.push({ x1: a.x, z1: a.z, x2: b.x, z2: b.z, color });
+      }
+      posts.push({ x: a.x, z: a.z, color });
+    }
+    // One shade tree in the yard, at the corner away from the gate (most houses)
+    if (h.hash % 5 !== 0) {
+      const back = corners[(gateSide + 2) % 4];
+      const tx = back.x + (h.cx - back.x) * 0.16;
+      const tz = back.z + (h.cz - back.z) * 0.16;
+      if (roadWeightAt(tx, tz) < 0.02 && !others.some((o) => insideBox(o, tx, tz, 0.3))) {
+        yardTrees.push({ x: tx, z: tz, s: 0.38 + ((h.hash >> 2) % 5) * 0.06, rot: h.hash * 0.37 });
+      }
+    }
+  }
+
+  const palette = [new THREE.Color('#a8492f'), new THREE.Color('#e8dfca'), new THREE.Color('#bdb9ae')];
+  const capPalette = [new THREE.Color('#d9cfc0'), new THREE.Color('#b8433a'), new THREE.Color('#8f8c84')];
+  const H = 1.45;
+  const wallGeo = new THREE.BoxGeometry(1, 1, 1);
+  wallGeo.translate(0, 0.5, 0);
+  const wallMesh = new THREE.InstancedMesh(wallGeo, new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.9, envMapIntensity: 0.25 }), segs.length);
+  const capMesh = new THREE.InstancedMesh(wallGeo, new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.8, envMapIntensity: 0.25 }), segs.length);
+  const d = new THREE.Object3D();
+  segs.forEach((sg, i) => {
+    const len = Math.hypot(sg.x2 - sg.x1, sg.z2 - sg.z1);
+    const mx = (sg.x1 + sg.x2) / 2;
+    const mz = (sg.z1 + sg.z2) / 2;
+    const y = groundHeightAt(mx, mz) - 0.05;
+    d.position.set(mx, y, mz);
+    d.rotation.set(0, Math.atan2(sg.x2 - sg.x1, sg.z2 - sg.z1), 0);
+    d.scale.set(0.18, H, len);
+    d.updateMatrix();
+    wallMesh.setMatrixAt(i, d.matrix);
+    wallMesh.setColorAt(i, palette[sg.color]);
+    d.position.y = y + H;
+    d.scale.set(0.26, 0.09, len + 0.06);
+    d.updateMatrix();
+    capMesh.setMatrixAt(i, d.matrix);
+    capMesh.setColorAt(i, capPalette[sg.color]);
+  });
+  const postMesh = new THREE.InstancedMesh(wallGeo, new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85, envMapIntensity: 0.25 }), posts.length);
+  posts.forEach((p, i) => {
+    d.position.set(p.x, groundHeightAt(p.x, p.z) - 0.05, p.z);
+    d.rotation.set(0, 0, 0);
+    d.scale.set(0.38, H + 0.3, 0.38);
+    d.updateMatrix();
+    postMesh.setMatrixAt(i, d.matrix);
+    postMesh.setColorAt(i, capPalette[p.color]);
+  });
+  wallMesh.castShadow = true;
+  wallMesh.receiveShadow = true;
+  postMesh.castShadow = true;
+  root.add(wallMesh, capMesh, postMesh);
+
+  // ---- Yard trees: broad low-poly canopies in a few greens ----
+  const rain = createRainTreeGeometries();
+  const trunks = new THREE.InstancedMesh(rain.trunk, new THREE.MeshStandardMaterial({ color: '#5b4636', roughness: 0.9, envMapIntensity: 0.2 }), yardTrees.length);
+  const crowns = new THREE.InstancedMesh(rain.canopy, new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85, flatShading: true, envMapIntensity: 0.2 }), yardTrees.length);
+  const greens = ['#3f7a2c', '#4f8a32', '#356b28', '#5a9338', '#2f6a2a'].map((c) => new THREE.Color(c));
+  yardTrees.forEach((t, i) => {
+    d.position.set(t.x, groundHeightAt(t.x, t.z) - 0.1, t.z);
+    d.rotation.set(0, t.rot, 0);
+    d.scale.set(t.s, t.s * 1.1, t.s);
+    d.updateMatrix();
+    trunks.setMatrixAt(i, d.matrix);
+    crowns.setMatrixAt(i, d.matrix);
+    crowns.setColorAt(i, greens[i % greens.length]);
+  });
+  trunks.castShadow = true;
+  crowns.castShadow = true;
+  crowns.receiveShadow = true;
+  root.add(trunks, crowns);
+
+  // ---- Parked cars: white Toyotas, a red pickup now and then ----
+  const bodyParts = [
+    (() => { const g = new THREE.BoxGeometry(1.75, 0.62, 4.2); g.translate(0, 0.62, 0); return g; })(),
+    (() => { const g = new THREE.BoxGeometry(1.6, 0.55, 2.0); g.translate(0, 1.2, -0.25); return g; })(),
+  ];
+  const darkParts: THREE.BufferGeometry[] = [];
+  for (const [wx, wz] of [[-0.82, 1.35], [0.82, 1.35], [-0.82, -1.35], [0.82, -1.35]]) {
+    const w = new THREE.CylinderGeometry(0.33, 0.33, 0.22, 12);
+    w.rotateZ(Math.PI / 2);
+    w.translate(wx, 0.33, wz);
+    darkParts.push(w);
+  }
+  const glass = new THREE.BoxGeometry(1.62, 0.42, 1.9);
+  glass.translate(0, 1.22, -0.25);
+  darkParts.push(glass);
+  const bodyGeo = mergeGeometries(bodyParts.map((g) => g.toNonIndexed()), false)!;
+  const darkGeo = mergeGeometries(darkParts.map((g) => g.toNonIndexed()), false)!;
+  const carBodies = new THREE.InstancedMesh(bodyGeo, new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.35, metalness: 0.3, envMapIntensity: 0.6 }), cars.length);
+  const carDark = new THREE.InstancedMesh(darkGeo, new THREE.MeshStandardMaterial({ color: '#1c2228', roughness: 0.4, metalness: 0.3, envMapIntensity: 0.4 }), cars.length);
+  const carColors = ['#f4f5f2', '#f4f5f2', '#c8cdd2', '#b8322a', '#f4f5f2', '#2c3e57'].map((c) => new THREE.Color(c));
+  cars.forEach((c, i) => {
+    d.position.set(c.x, groundHeightAt(c.x, c.z) + 0.02, c.z);
+    d.rotation.set(0, c.heading, 0);
+    d.scale.set(1, 1, 1);
+    d.updateMatrix();
+    carBodies.setMatrixAt(i, d.matrix);
+    carDark.setMatrixAt(i, d.matrix);
+    carBodies.setColorAt(i, carColors[c.color]);
+  });
+  carBodies.castShadow = true;
+  root.add(carBodies, carDark);
+  return { group: root, cars };
+}
+
 function orientedBox(pts: { x: number; y: number }[]) {
   let best = { area: Infinity, angle: 0, cu: 0, cv: 0, L: 0, D: 0 };
   for (let i = 0; i < pts.length; i++) {
@@ -491,6 +709,8 @@ export function buildMyitkyinaOsm3DGroup(
 
   const labeledStreetNames = new Set<string>();
   const labeledBuildingNames = new Set<string>();
+  const compoundCandidates: { cx: number; cz: number; box: ReturnType<typeof orientedBox>; hash: number }[] = [];
+  const buildingBoxes: { cx: number; cz: number; box: ReturnType<typeof orientedBox> }[] = [];
 
   let buildingsCount = 0;
   let roadsCount = 0;
@@ -732,6 +952,25 @@ export function buildMyitkyinaOsm3DGroup(
       }
       if (overlapsHero) continue;
 
+      // The railway station is modeled by hand (railwayStation.ts); keep only its map entry
+      if (String(props.building) === 'train_station') {
+        const stName = String(props.name || props['name:my'] || '').trim();
+        if (stName && !labeledBuildingNames.has(stName)) {
+          labeledBuildingNames.add(stName);
+          namedPlaces.push({
+            id: String(feat.id || props['@id'] || `osm_bldg_station`),
+            nameMm: String(props['name:my'] || stName),
+            nameEn: String(props['name:en'] || props.name || 'Railway Station'),
+            category: 'ဘူတာရုံ (Station)',
+            x: Math.round(cx),
+            z: Math.round(cz),
+            lat: Number(cLat.toFixed(5)),
+            lng: Number(cLng.toFixed(5)),
+          });
+        }
+        continue;
+      }
+
       // Calculate exact footprint span
       let bMinX = Infinity;
       let bMaxX = -Infinity;
@@ -915,6 +1154,11 @@ export function buildMyitkyinaOsm3DGroup(
       // large / irregular buildings get a flat concrete roof slab with a parapet.
       const box = orientedBox(cleanLocalPts);
       const footprintArea = Math.abs(signedArea) / 2;
+      // Houses (not big or named buildings) get a compound wall later
+      if (footprintArea > 25 && footprintArea < 320 && height < 8.5 && nameRaw.length === 0) {
+        compoundCandidates.push({ cx, cz, box, hash });
+      }
+      buildingBoxes.push({ cx, cz, box });
       const fill = footprintArea / Math.max(1, box.L * box.D);
       const pitched = forcePitched || (fill > 0.78 && footprintArea < 650 && height < 10 && box.D > 3);
       if (pitched) {
@@ -1400,6 +1644,10 @@ export function buildMyitkyinaOsm3DGroup(
       nearestRoadDistM: Number.isFinite(bestDist) ? Math.round(bestDist) : 0,
     };
   };
+
+  const compounds = buildCompoundWalls(compoundCandidates, buildingBoxes);
+  group.add(compounds.group);
+  for (const c of compounds.cars) colliders.push({ x: c.x, z: c.z, r: 1.7 });
 
   return {
     group,

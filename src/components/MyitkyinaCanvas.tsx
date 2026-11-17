@@ -5,6 +5,20 @@ import { MusicTrackId, soundEngine } from '../audio/soundEngine';
 import { getSettings, onSettingsChanged, QUALITY_PROFILES } from '../settings/gameSettings';
 import { WORLD_BOUNDS } from '../world/mapData.generated';
 import { curbsideSpots, nearestStreetPoint } from '../world/worldLayout';
+import { createRailwayStation, STATION, STATION_ARRIVAL, STATION_EBIKE, STATION_SKYEV } from '../world/railwayStation';
+import {
+  composePostcard,
+  addPostcard,
+  JOURNAL_PLACES,
+  loadStamps,
+  nearestPlace,
+  saveStamps,
+  type JournalCard,
+} from '../journal/journal';
+import { createSutaungpyaePagoda, isAtSutaungpyaeTerrace, SUTAUNGPYAE } from '../world/sutaungpyae';
+import { clampToAungMyinThar, createAungMyinThar, inAungMyinThar } from '../world/aungMyinThar';
+import { createActivityRunner, type ActivityId } from '../activities/activities';
+import { createBirds, createPowerLines } from '../world/streetLife';
 import {
   AUTOSAVE_INTERVAL_MS,
   GameSaveData,
@@ -67,7 +81,6 @@ import {
   createMyitkyinaTerrainMesh,
   createPlayableVehicle,
   createSmugglerEnemies,
-  createSutaungpyaePagoda,
   WorldVehicle,
 } from '../world/models';
 import {
@@ -206,7 +219,7 @@ export interface GameControllerActions {
   pauseGame: () => void;
   restartGame: () => void;
   teleportToRegion: (x: number, z: number, nameMm: string) => void;
-  summonVehicle: (type: 'ebike' | 'hilux4x4' | 'tuktuk' | 'riverboat') => void;
+  summonVehicle: (type: WorldVehicle['type']) => void;
   setTimeOfDay: (tod: TimeOfDay) => void;
   /** Relaxed, untimed routes: sunset e-bike ride or early-morning jog */
   startScenicRoute: (id: ScenicRouteId) => void;
@@ -215,11 +228,14 @@ export interface GameControllerActions {
   startFoodDelivery: () => void;
   startStreetTimeTrial: () => void;
   setCameraMode: (mode: CameraMode) => void;
+  cycleCamera: () => void;
+  horn: () => void;
   toggleMute: () => void;
   triggerActionAttack: () => void;
   toggleEnterExitVehicle: () => void;
   setVirtualStick: (x: number, y: number, sprinting: boolean) => void;
   setVirtualJumpBrake: (held: boolean) => void;
+  setVirtualDescend: (held: boolean) => void;
   setVirtualThrottle: (throttle: number) => void;
   resetCameraBehindPlayer: () => void;
   setWaypoint: (x: number, z: number, labelMm: string) => void;
@@ -244,6 +260,12 @@ export interface GameControllerActions {
   uploadCustomOsmFile: (file: File) => Promise<void>;
   interactWithNpc: (npcId?: string) => void;
   closeNpcDialogue: () => void;
+  closeJournalCard: () => void;
+  startActivity: (id: ActivityId) => void;
+  stopActivity: () => void;
+  activityChoose: (choiceId: string) => void;
+  closeActivityResult: () => void;
+  takePhoto: () => void;
   selectNpcDialogueOption: (optionId: string) => void;
   buyOrSellNpcItem: (itemId: string) => void;
 }
@@ -274,7 +296,7 @@ const TIME_PALETTES: Record<
     hemiSky: 0x93c5fd,
     hemiGround: 0x365314,
     hemiIntensity: 0.85,
-    sunPos: [95, 110, 60],
+    sunPos: [170, 42, 25],
   },
   noon: {
     skyHex: 0x38bdf8,
@@ -287,14 +309,14 @@ const TIME_PALETTES: Record<
     sunPos: [40, 160, 30],
   },
   sunset: {
-    skyHex: 0xc2410c,
-    fogHex: 0xfb923c,
-    sunHex: 0xfde047,
-    sunIntensity: 2.1,
-    hemiSky: 0xf97316,
-    hemiGround: 0x3f2e21,
-    hemiIntensity: 0.75,
-    sunPos: [-120, 65, 80],
+    skyHex: 0xf2b48a,
+    fogHex: 0xe9b08c,
+    sunHex: 0xffb066,
+    sunIntensity: 2.4,
+    hemiSky: 0xa9a3c9,
+    hemiGround: 0x4a3426,
+    hemiIntensity: 0.7,
+    sunPos: [-175, 26, 35],
   },
   night: {
     skyHex: 0x091326,
@@ -307,6 +329,8 @@ const TIME_PALETTES: Record<
     sunPos: [-60, 120, -60],
   },
 };
+
+const _sunDir = new THREE.Vector3();
 
 export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef }) => {
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
@@ -339,8 +363,9 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
       powerPreference: 'high-performance',
     });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.08;
+    // Neutral tone mapping keeps the bright low-poly colors saturated (ACES greyed them out)
+    renderer.toneMapping = THREE.NeutralToneMapping;
+    renderer.toneMappingExposure = 1.0;
     renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, quality.maxPixelRatio));
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.shadowMap.enabled = !isSoftwareGl && quality.shadows;
@@ -409,13 +434,37 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
     const { group: manauGroup, drums: manauDrums } = createManauParkComplex(renderer);
     scene.add(manauGroup);
 
+    // Myitkyina Railway Station: building, platforms, tracks and trains (matched to Google Maps)
+    const railwayStation = createRailwayStation(groundHeightAt(STATION.x, STATION.z));
+    scene.add(railwayStation.group);
+
     // 1:1 map: Balaminhtin Bridge is ~5 km north of the 3 km play area, so the quest's
     // checkpoints sit on Strand Road instead (variable name kept for save compatibility).
     const { group: bridgeGroup, checkpoints: bridgeCheckpoints } = createStrandRoadCheckpoints();
     scene.add(bridgeGroup);
 
-    const pagodaGroup = createSutaungpyaePagoda();
+    // Sutaungpyae Pagoda at its real location (matched to Google Maps)
+    const sutaungpyae = createSutaungpyaePagoda(groundHeightAt(SUTAUNGPYAE.x, SUTAUNGPYAE.z));
+    const pagodaGroup = sutaungpyae.group;
     scene.add(pagodaGroup);
+
+    // Street life: power poles and wires along the main streets, birds overhead
+    scene.add(createPowerLines());
+    const birds = createBirds();
+    scene.add(birds.group);
+
+    // Aung Myin Thar recreation area, ~26 km north on the Myitsone road (reached by fast travel)
+    const aungMyinThar = createAungMyinThar();
+    scene.add(aungMyinThar.group);
+
+    /** Keep a position inside the city map, or inside the resort valley when the player is there. */
+    const clampPlayable = (x: number, z: number) =>
+      inAungMyinThar(x, z, 80)
+        ? clampToAungMyinThar(x, z)
+        : {
+            x: THREE.MathUtils.clamp(x, WORLD_BOUNDS.minX, WORLD_BOUNDS.maxX),
+            z: THREE.MathUtils.clamp(z, WORLD_BOUNDS.minZ, WORLD_BOUNDS.maxZ),
+          };
 
     // The hand-built fictional downtown is replaced by real OSM buildings at 1:1;
     // kept as an empty group so the existing visibility toggles still work.
@@ -505,6 +554,7 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
     // Interactive 3D Mission Markers (Food Delivery & Sitapu Street Time Trial)
     const { group: challengeMarkersGroup, updateMarkers } = createChallengeMarkers();
     scene.add(challengeMarkersGroup);
+    challengeMarkersGroup.visible = false; // V2: no timed delivery / time-trial gates
 
     // Arcade Gameplay Boosters: 12 Nitro Speed Boost Rings, 10 Golden Treasure Chests & Dragon Shockwave
     const {
@@ -515,6 +565,9 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
       updateArcadeItems,
     } = createArcadeBoostRingsAndChests();
     scene.add(arcadeGroup);
+    // V2: no boost rings or treasure chests; the group stays for the shockwave effect
+    speedRings.splice(0).forEach((r) => (r.group ? (r.group.visible = false) : undefined));
+    treasureChests.splice(0).forEach((c) => (c.group ? (c.group.visible = false) : undefined));
 
     // Ayeyarwady Riverbank & Under Balaminhtin Bridge 3D Fishing Piers, Swimming Fish & Floating Bobber
     const {
@@ -523,6 +576,7 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
       updateFishingWorld,
     } = createAyeyarwadyFishingSpots();
     scene.add(fishingGroup);
+    fishingGroup.visible = false; // V2: fishing removed
 
     createInstancedFoliageAndRocks(scene);
 
@@ -591,7 +645,10 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
     const vehicles: WorldVehicle[] = [
       // Parked on the street by the Manau park, not on the dance ground
       createPlayableVehicle('veh_ebike_a5pro', 'ebike', parkSpots[0].x, parkSpots[0].z, parkSpots[0].heading, isSoftwareGl),
-      createPlayableVehicle('veh_ebike_aimaone', 'ebike', parkSpots[1].x, parkSpots[1].z, parkSpots[1].heading, isSoftwareGl),
+      // The Kachin Sky EV waits in the station forecourt
+      createPlayableVehicle('veh_kachin_skyev', 'skyev', STATION_SKYEV.x, STATION_SKYEV.z, STATION_SKYEV.heading, isSoftwareGl),
+      // One e-bike waits at the station, where a new journey starts
+      createPlayableVehicle('veh_ebike_aimaone', 'ebike', STATION_EBIKE.x, STATION_EBIKE.z, STATION_EBIKE.heading, isSoftwareGl),
       createPlayableVehicle('veh_hilux_manau', 'hilux4x4', parkSpots[2].x, parkSpots[2].z, parkSpots[2].heading, isSoftwareGl),
       createPlayableVehicle('veh_tuktuk_market', 'tuktuk', parkSpots[3].x, parkSpots[3].z, parkSpots[3].heading, isSoftwareGl),
       createPlayableVehicle(
@@ -637,8 +694,8 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
     });
 
     // Smuggler Enemy Hazards
-    const enemies = createSmugglerEnemies();
-    enemies.forEach((e) => scene.add(e.group));
+    // V2 (relax & explore): no combat, so no enemies are spawned
+    const enemies: ReturnType<typeof createSmugglerEnemies> = [];
 
     // Pooled Burst Particles
     const particlePool: {
@@ -693,15 +750,20 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
       meritLevel: 1,
       comboCount: 0,
       comboTimer: 0,
-      playerX: 0,
-      playerY: playableSurfaceHeightAt(0, 36),
-      playerZ: 36,
+      // V2: the journey starts on the station platform, just off the Mandalay train
+      playerX: STATION_ARRIVAL.x,
+      playerY: playableSurfaceHeightAt(STATION_ARRIVAL.x, STATION_ARRIVAL.z),
+      playerZ: STATION_ARRIVAL.z,
       playerVx: 0,
       playerVz: 0,
       playerVy: 0,
-      playerHeading: Math.PI, // Facing North (-Z) toward Sitapu Manau Totems (0, 0)
-      cameraYaw: Math.PI,
-      cameraYawTarget: Math.PI,
+      playerHeading: STATION_ARRIVAL.heading,
+      cameraYaw: STATION_ARRIVAL.heading,
+      cameraYawTarget: STATION_ARRIVAL.heading,
+      /** Travel journal: landmark stamps found, the fact card on screen, a pending photo */
+      stamps: loadStamps(),
+      journalCard: null as JournalCard | null,
+      photoRequest: false,
       cameraPitch: 0.36, // Comfortable Mini-3D over-the-shoulder elevation angle
       manualLookCooldown: 0,
       isGrounded: true,
@@ -724,6 +786,8 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
       smoothForward: 0,
       virtualSprint: false,
       virtualJumpHeld: false,
+      /** Sky EV: hold to descend (touch button) */
+      virtualDescendHeld: false,
       virtualThrottle: 0, // +1 Gas pedal, -1 Reverse/Brake pedal
       isManauDancing: false,
       danceRewardTimer: 0,
@@ -800,6 +864,25 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
 
     _smoothLookAt.set(sim.playerX, sim.playerY + 1.8, sim.playerZ);
 
+    const placeAtStationArrival = () => {
+      sim.playerX = STATION_ARRIVAL.x;
+      sim.playerZ = STATION_ARRIVAL.z;
+      sim.playerY = playableSurfaceHeightAt(STATION_ARRIVAL.x, STATION_ARRIVAL.z);
+      sim.playerVx = 0;
+      sim.playerVz = 0;
+      sim.playerHeading = STATION_ARRIVAL.heading;
+      sim.cameraYaw = STATION_ARRIVAL.heading;
+      sim.cameraYawTarget = STATION_ARRIVAL.heading;
+      sim.activeVehicle = null;
+    };
+
+    const TIME_LABEL_MM: Record<TimeOfDay, string> = {
+      morning: 'မနက်ခင်း',
+      noon: 'နေ့လယ်',
+      sunset: 'နေဝင်ချိန်',
+      night: 'ညအချိန်',
+    };
+
     const showBanner = (title: string, subtitle: string) => {
       sim.notification = { title, subtitle, timestamp: performance.now() };
     };
@@ -837,7 +920,7 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
       downtownGroup.visible = !sim.osmVisible;
       built.debugGroup.visible = sim.osmDebugMode;
       osmDebugContainerGroup.add(built.debugGroup);
-      osmColliders = built.colliders;
+      osmColliders = [...built.colliders, ...railwayStation.colliders, ...sutaungpyae.colliders, ...aungMyinThar.colliders];
       osmUpdateDebugFn = built.updateDebugOverlay;
       sim.osmLoaded = true;
       sim.osmSourceName = sourceLabel;
@@ -1360,14 +1443,9 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
 
     const triggerInteractOrAttack = () => {
       if (sim.phase !== 'playing') return;
+      if (activities.startNearby()) return;
 
-      // 0. If currently in Fishing Mini-Game, tapping action hooks or casts!
-      if (sim.isFishing) {
-        handleFishingActionTap();
-        return;
-      }
-
-      // 0.25 Check nearby Interactive NPCs (Shopkeeper, Quest Giver, Regular Citizen)
+      // Talk to a nearby local
       for (const npc of MYITKYINA_INTERACTIVE_NPCS) {
         if (Math.hypot(sim.playerX - npc.x, sim.playerZ - npc.z) < 8.5) {
           openNpcInteractionModal(npc);
@@ -1375,221 +1453,24 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
         }
       }
 
-      // 0.5 Check nearby Ayeyarwady / Balaminhtin Bridge Fishing Piers
-      for (const spot of fishingSpots) {
-        if (Math.hypot(sim.playerX - spot.x, sim.playerZ - spot.z) < 12.5) {
-          startFishingAtSpot(spot.id);
-          return;
-        }
-      }
-
-      // 1. Check nearby Manau Drum activation
-      for (const drum of manauDrums) {
-        if (!drum.activated && Math.hypot(sim.playerX - drum.x, sim.playerZ - drum.z) < 5.5) {
-          drum.activated = true;
-          (drum.ringMesh.material as THREE.MeshStandardMaterial).color.set('#10b981');
-          (drum.ringMesh.material as THREE.MeshStandardMaterial).emissive.set('#059669');
-          soundEngine.playManauGong();
-          spawnBurst(drum.x, groundHeightAt(drum.x, drum.z) + 1.8, drum.z, '#f59e0b', 12);
-
-          const qManau = sim.quests.find((q) => q.id === 'quest_manau');
-          if (qManau && !qManau.completed) {
-            qManau.progress = Math.min(qManau.goal, qManau.progress + 1);
-            sim.score += 150;
-            if (qManau.progress >= qManau.goal) {
-              qManau.completed = true;
-              sim.jadeCount += qManau.rewardJade;
-              sim.score += 500;
-              soundEngine.playQuestComplete();
-              showBanner(
-                'မနောပွဲတော် အောင်မြင်စွာ စတင်ပြီ!',
-                `Manau Festival Awakened! +${qManau.rewardJade.toLocaleString()} MMK`,
-              );
-            } else {
-              showBanner(
-                `မနောစည်တော် (${qManau.progress}/${qManau.goal}) တီးခတ်ပြီး`,
-                'Sacred Manau Drum Resonates Across Myitkyina',
-              );
-            }
-          }
-          return;
-        }
-      }
-
-      // 2. Check Jaw Bum Peace Bell
-      if (
-        !peaceBell.rung &&
-        Math.hypot(sim.playerX - peaceBell.x, sim.playerZ - peaceBell.z) < 6.8
-      ) {
-        peaceBell.rung = true;
-        soundEngine.playManauGong();
-        soundEngine.playQuestComplete();
-        spawnBurst(
-          peaceBell.x,
-          groundHeightAt(peaceBell.x, peaceBell.z) + 3.0,
-          peaceBell.z,
-          '#fbbf24',
-          14,
-        );
-        const qBell = sim.quests.find((q) => q.id === 'quest_jawbum');
-        if (qBell && !qBell.completed) {
-          qBell.progress = 1;
-          qBell.completed = true;
-          sim.jadeCount += qBell.rewardJade;
-          sim.score += 600;
-          showBanner(
-            'ဂျော်ဘွမ် ငြိမ်းချမ်းရေးခေါင်းလောင်း တီးခတ်အောင်မြင်!',
-            `Jaw Bum Highland Peace Bell Rung! +${qBell.rewardJade.toLocaleString()} MMK`,
-          );
-        }
-        return;
-      }
-
-      // 2.5 Check nearby Famous Myitkyina Shop / Fish Shop / Restaurant / Hotel / University Interaction
+      // Rest at a famous shop / tea house
       for (const b of MYITKYINA_FAMOUS_BUILDINGS) {
+        if (b.id === 'bldg_fish_shop_sitapu' || b.id === 'bldg_fish_shop_bridge') continue;
         if (b.interactPromptMm && Math.hypot(sim.playerX - b.x, sim.playerZ - b.z) < 12.5) {
-          if (b.id === 'bldg_fish_shop_sitapu' || b.id === 'bldg_fish_shop_bridge') {
-            if (sim.fishingBasket.length > 0) {
-              sellCaughtFish();
-            } else {
-              buyOrUpgradeFishingGear();
-            }
-            return;
-          }
           sim.health = sim.maxHealth;
           sim.stamina = 100;
-          sim.score += 50;
           soundEngine.playJadeCollect(4);
-          spawnBurst(b.x, playableSurfaceHeightAt(b.x, b.z) + 2.2, b.z, b.accentColor, 14);
-          showBanner(
-            `${b.nameMm} (${b.nameEn})`,
-            b.buffDescriptionMm || 'အားအင်နှင့် အသက် (HP 100%) အပြည့်ပြန်ဖြည့်ပြီး!',
-          );
+          showBanner(`${b.nameMm}`, b.buffDescriptionMm || 'ခဏနားပြီး အားပြန်ပြည့်ပါပြီ');
           return;
         }
       }
 
-      // 2.6 Check Sutaungpyae Golden Pagoda Prayer (ဆုတောင်းပြည့်စေတီ ဘုရားဖူး ဆုတောင်းရန်)
-      if (Math.hypot(sim.playerX - 68, sim.playerZ - 224) < 18) {
-        sim.health = sim.maxHealth;
+      // Pray at the Sutaungpyae stupa terrace
+      if (isAtSutaungpyaeTerrace(sim.playerX, sim.playerZ)) {
         sim.stamina = 100;
-        sim.score += 250;
         soundEngine.playManauGong();
-        soundEngine.playJadeCollect(5);
-        triggerShockwave(68, playableSurfaceHeightAt(68, 224), 224, '#fbbf24');
-        spawnBurst(sim.playerX, sim.playerY + 2.0, sim.playerZ, '#fbbf24', 18);
-        showBanner(
-          '🙏 ဆုတောင်းပြည့်စေတီတွင် ရွှေသင်္ကန်းကပ်လှူ ဆုတောင်းပြီး!',
-          'ကောင်းချီးမင်္ဂလာနှင့် HP 100% အပြည့် ပြန်လည်ရရှိပါပြီ!',
-        );
-        return;
-      }
-
-      // 2.7 Check Sitapu Manau Park Plaza Dance Interaction (မနောကွင်းတွင် မနောအက ကရန်)
-      if (!sim.activeVehicle && Math.hypot(sim.playerX, sim.playerZ - 7) < 22) {
-        setManauDanceState(!sim.isManauDancing);
-        return;
-      }
-
-      // 3. Otherwise perform Kachin Nhtu Dragon Sword Attack (or Vehicle Nitro Turbo Boost)
-      if (sim.attackCooldown <= 0) {
-        sim.attackCooldown = 0.34;
-        sim.slashAnimTimer = 0.24;
-        soundEngine.playSwordSlash();
-        triggerShockwave(
-          sim.playerX,
-          sim.playerY,
-          sim.playerZ,
-          sim.activeVehicle ? '#06b6d4' : '#34d399',
-        );
-
-        if (sim.activeVehicle) {
-          // Smooth forward Nitro Turbo Boost in vehicle
-          const boostAmt = 14 + (sim.meritLevel - 1) * 2.5;
-          sim.activeVehicle.speed = Math.min(42, sim.activeVehicle.speed + boostAmt);
-          spawnBurst(sim.playerX, sim.playerY + 0.8, sim.playerZ, '#06b6d4', 10);
-        } else {
-          // Auto-aim toward nearest enemy within 7.5m (GTA melee lock-on!)
-          let closestEnemy = null;
-          let minEDist = 7.5;
-          for (const enemy of enemies) {
-            if (!enemy.alive) continue;
-            const d = Math.hypot(enemy.x - sim.playerX, enemy.z - sim.playerZ);
-            if (d < minEDist) {
-              minEDist = d;
-              closestEnemy = enemy;
-            }
-          }
-          if (closestEnemy) {
-            sim.playerHeading = Math.atan2(
-              closestEnemy.x - sim.playerX,
-              closestEnemy.z - sim.playerZ,
-            );
-          }
-
-          const stepDist = 1.5;
-          const nextFoot = resolveBuildingCollision(
-            sim.playerX + Math.sin(sim.playerHeading) * stepDist,
-            sim.playerZ + Math.cos(sim.playerHeading) * stepDist,
-            0.85,
-          );
-          sim.playerX = nextFoot.x;
-          sim.playerZ = nextFoot.z;
-        }
-
-        const hitRange = 5.5 + (sim.meritLevel - 1) * 1.1;
-        const slashDamage = 60 + (sim.meritLevel - 1) * 20;
-
-        for (const enemy of enemies) {
-          if (!enemy.alive) continue;
-          const dist = Math.hypot(enemy.x - sim.playerX, enemy.z - sim.playerZ);
-          if (dist < hitRange) {
-            enemy.hp -= slashDamage;
-            enemy.hitFlashTimer = 0.16;
-            sim.hitstopTimer = 0.04;
-            sim.comboCount += 1;
-            sim.comboTimer = 5.0;
-            soundEngine.playHeavyImpact();
-            spawnBurst(enemy.x, groundHeightAt(enemy.x, enemy.z) + 1.3, enemy.z, '#ef4444', 12);
-
-            const kx = enemy.x - sim.playerX;
-            const kz = enemy.z - sim.playerZ;
-            const kl = Math.hypot(kx, kz) || 1;
-            enemy.x += (kx / kl) * 2.8;
-            enemy.z += (kz / kl) * 2.8;
-
-            if (enemy.hp <= 0) {
-              enemy.alive = false;
-              enemy.group.visible = false;
-              const bountyMmk = 6000 + sim.comboCount * 1000;
-              sim.score += 300;
-              sim.jadeCount += bountyMmk;
-              const qSmug = sim.quests.find((q) => q.id === 'quest_smugglers');
-              if (qSmug && !qSmug.completed) {
-                qSmug.progress = Math.min(qSmug.goal, qSmug.progress + 1);
-                if (qSmug.progress >= qSmug.goal) {
-                  qSmug.completed = true;
-                  sim.jadeCount += qSmug.rewardJade;
-                  soundEngine.playQuestComplete();
-                  showBanner(
-                    'ကမ်းနား လုံခြုံရေး အောင်မြင်ပြီ!',
-                    `All Rogue Smugglers Cleared! +${qSmug.rewardJade.toLocaleString()} MMK`,
-                  );
-                } else {
-                  showBanner(
-                    `မှောင်ခိုဂိုဏ်းသား ရှင်းလင်းမှု (${qSmug.progress}/${qSmug.goal})`,
-                    `Smuggler Defeated! +${bountyMmk.toLocaleString()} MMK (${sim.comboCount}x Combo)`,
-                  );
-                }
-              } else {
-                showBanner(
-                  `ရန်သူကို အနိုင်ယူပြီး! (+${bountyMmk.toLocaleString()} MMK)`,
-                  `Dragon Nhtu Slash! ${sim.comboCount}x Combo`,
-                );
-              }
-            }
-          }
-        }
+        spawnBurst(sim.playerX, sim.playerY + 2.0, sim.playerZ, '#fbbf24', 14);
+        showBanner('🙏 ဆုတောင်းပြည့်ဘုရား', 'ဆုတောင်းပြီးပါပြီ — စိတ်ချမ်းသာပါစေ');
       }
     };
 
@@ -1600,7 +1481,15 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
       }
       if (sim.activeVehicle) {
         const v = sim.activeVehicle;
+        if ((v.type === 'skyev' || v.type === 'ebike') && (v.alt ?? 0) > 1.5) {
+          showBanner('🛬 အရင် မြေပြင်ပေါ် ဆင်းပါ', 'Q (သို့) ⬇ ဆင်း ကို ဖိထားပါ');
+          return;
+        }
         v.group.rotation.z = 0;
+        v.group.rotation.x = 0;
+        v.alt = 0;
+        v.vAlt = 0;
+        liftBeam.visible = false;
         sim.activeVehicle = null;
         sim.virtualThrottle = 0;
         sim.playerX = v.x - Math.cos(v.heading) * (v.type === 'ebike' ? 1.4 : 2.8);
@@ -2079,18 +1968,85 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
     if (import.meta.env.DEV) {
       (window as unknown as { __game: unknown }).__game = {
         sim,
+        traffic: aiTrafficAgents,
+        camera,
+        scene,
+        renderer,
         get controller() {
           return controllerRef.current;
         },
       };
     }
 
+    // Soft cyan light column under a flying vehicle
+    const liftBeam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.7, 1.6, 1, 20, 1, true),
+      new THREE.MeshBasicMaterial({ color: '#7fe9ff', transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }),
+    );
+    liftBeam.visible = false;
+    scene.add(liftBeam);
+
+    // Activities & mini-games at the landmarks
+    const activities = createActivityRunner({
+      scene,
+      showBanner: (t, sub) => showBanner(t, sub),
+      playRing: () => soundEngine.playJadeCollect(4),
+      playWin: () => soundEngine.playQuestComplete(),
+      playSplash: () => soundEngine.playSplash(false),
+      summonVehicle: (type) => controllerRef.current?.summonVehicle(type),
+      teleport: (x, z, heading) => {
+        controllerRef.current?.teleportToRegion(x, z, 'လုပ်ဆောင်ချက်');
+        sim.playerHeading = heading;
+        sim.cameraYaw = heading;
+        sim.cameraYawTarget = heading;
+      },
+      setWaypoint: (x, z, labelMm) => {
+        sim.customWaypoint = { x, z, labelMm };
+      },
+      placePlayer: (x, y, z, heading) => {
+        sim.playerX = x;
+        sim.playerY = y;
+        sim.playerZ = z;
+        sim.playerVx = 0;
+        sim.playerVz = 0;
+        sim.playerHeading = heading;
+        if (sim.manualLookCooldown <= 0) sim.cameraYawTarget = heading;
+      },
+      burst: (x, y, z, color) => spawnBurst(x, y, z, color, 14),
+    });
+
     controllerRef.current = {
       startGame: () => {
         clearSave(); // ဂိမ်းအသစ် — save အဟောင်းကို ဖျက်သည်
+        sim.stamps = [];
+        saveStamps([]);
+        sim.journalCard = null;
+        activities.stop();
+        activities.reset();
+        placeAtStationArrival();
         sim.phase = 'playing';
         soundEngine.playManauGong();
+        showBanner('🚆 မန္တလေးမှ ရထား ဆိုက်ပါပြီ', 'မြစ်ကြီးနားမှ ကြိုဆိုပါတယ် — အေးအေးဆေးဆေး လျှောက်ကြည့်ပါ');
         persistGame();
+      },
+      startActivity: (id: ActivityId) => {
+        if (sim.phase !== 'playing') return;
+        activities.start(id);
+      },
+      stopActivity: () => {
+        activities.stop();
+        sim.customWaypoint = null;
+      },
+      activityChoose: (choiceId: string) => activities.choose(choiceId),
+      closeActivityResult: () => {
+        activities.closeResult();
+        sim.customWaypoint = null;
+      },
+      closeJournalCard: () => {
+        sim.journalCard = null;
+      },
+      takePhoto: () => {
+        if (sim.phase === 'playing') sim.photoRequest = true;
       },
       continueGame: () => {
         const data = loadGame();
@@ -2124,14 +2080,10 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
         sim.stamina = 100;
         sim.jadeCount = 50000; // Reset to 50,000 MMK starter capital
         sim.score = 0;
-        sim.playerX = 0;
-        sim.playerZ = 36;
-        sim.playerY = playableSurfaceHeightAt(0, 36);
-        sim.playerVx = 0;
-        sim.playerVz = 0;
-        sim.playerHeading = Math.PI;
-        sim.cameraYaw = Math.PI;
-        sim.cameraYawTarget = Math.PI;
+        placeAtStationArrival();
+        sim.stamps = [];
+        saveStamps([]);
+        sim.journalCard = null;
         sim.activeVehicle = null;
         sim.activeChallenge = null;
         sim.isManauDancing = false;
@@ -2194,7 +2146,7 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
         soundEngine.playJadeCollect(3);
         showBanner(`နေရာရွှေ့ပြောင်းမှု: ${nameMm}`, 'Fast Traveled to Landmark');
       },
-      summonVehicle: (type: 'ebike' | 'hilux4x4' | 'tuktuk' | 'riverboat') => {
+      summonVehicle: (type: WorldVehicle['type']) => {
         stopFishingMode(true);
         const targetVeh = vehicles.find((v) => v.type === type);
         if (!targetVeh) return;
@@ -2279,6 +2231,12 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
       startStreetTimeTrial: () => {
         startStreetTimeTrialMission();
       },
+      cycleCamera: () => {
+        const order: CameraMode[] = ['chase', 'high', 'cinematic', 'overhead'];
+        const next = order[(order.indexOf(sim.cameraMode) + 1) % order.length];
+        controllerRef.current?.setCameraMode(next);
+      },
+      horn: () => soundEngine.playHorn(),
       setCameraMode: (mode: CameraMode) => {
         sim.cameraMode = mode;
       },
@@ -2301,6 +2259,9 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
           sim.jumpBufferTimer = 0.16;
         }
         sim.virtualJumpHeld = held;
+      },
+      setVirtualDescend: (held: boolean) => {
+        sim.virtualDescendHeld = held;
       },
       setVirtualThrottle: (throttle: number) => {
         sim.virtualThrottle = throttle;
@@ -2690,6 +2651,8 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
       const elapsed = clock.getElapsedTime();
 
       updateWater(elapsed);
+      aungMyinThar.update(elapsed);
+      birds.update(elapsed, sim.playerX, sim.playerY, sim.playerZ);
       updateTrafficLights(elapsed);
       updateWeather(
         elapsed,
@@ -2699,6 +2662,7 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
         sim.playerZ,
         sim.timeOfDay,
         sim.weather,
+        _sunDir.set(...TIME_PALETTES[sim.timeOfDay].sunPos),
       );
       updateTraffic(dt, sim.playerX, sim.playerZ);
       updateNPCs(elapsed, dt);
@@ -2784,16 +2748,34 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
           );
           const isBrakeHeld = Boolean(heldKeys['Space'] || sim.virtualJumpHeld);
 
+          hero.helmetMesh.visible = sim.activeVehicle?.type === 'ebike';
+          if (!sim.activeVehicle) liftBeam.visible = false;
           if (sim.activeVehicle) {
             // =========================================================================
             // GTA-STYLE VEHICLE DRIVING PHYSICS & STEADY FORWARD/REVERSE CHASE CAMERA
             // =========================================================================
             const v = sim.activeVehicle;
+            // Kachin Sky EV: Space / ⬆ climbs, Q / ⬇ descends; above ~6 m it flies over everything
+            // Both the Kachin Sky EV and the e-bike can fly (Space / ⬆ climbs, Q / ⬇ descends)
+            const isSky = v.type === 'skyev' || v.type === 'ebike';
+            let airborne = 0;
+            if (isSky) {
+              const up = isBrakeHeld;
+              const down = Boolean(heldKeys['KeyQ'] || heldKeys['ControlLeft'] || sim.virtualDescendHeld);
+              const targetClimb = up ? 9 : down ? -9 : 0;
+              v.vAlt = THREE.MathUtils.damp(v.vAlt ?? 0, targetClimb, 3.2, dt);
+              v.alt = THREE.MathUtils.clamp((v.alt ?? 0) + (v.vAlt ?? 0) * dt, 0, 180);
+              if (v.alt <= 0 && (v.vAlt ?? 0) < 0) v.vAlt = 0;
+              airborne = THREE.MathUtils.smoothstep(v.alt, 0.3, 3);
+            }
+            const flying = isSky && (v.alt ?? 0) > 6;
             const maxSpeed =
-              v.type === 'hilux4x4'
-                ? 34
+              v.type === 'skyev'
+                ? 30 + airborne * 22
                 : v.type === 'ebike'
-                  ? 29
+                ? 29 + airborne * 16
+                : v.type === 'hilux4x4'
+                ? 34
                   : v.type === 'tuktuk'
                     ? 26
                     : 25;
@@ -2815,7 +2797,7 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
               v.speed *= Math.exp(-1.4 * dt);
             }
 
-            if (isBrakeHeld) {
+            if (isBrakeHeld && !isSky) {
               v.speed *= Math.exp(-8.0 * dt);
             }
             v.speed = THREE.MathUtils.clamp(v.speed, -18, maxSpeed);
@@ -2838,13 +2820,21 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
                 v.speed *= -0.35;
               }
               v.group.position.set(v.x, -0.25 + Math.sin(elapsed * 3.5) * 0.06, v.z);
+            } else if (flying) {
+              // In the air: no buildings or water in the way, only the edge of the map
+              const air = clampPlayable(nextX, nextZ);
+              v.x = air.x;
+              v.z = air.z;
+              const groundY = Math.max(0, playableSurfaceHeightAt(v.x, v.z));
+              v.group.position.set(v.x, groundY + (v.alt ?? 0) + Math.sin(elapsed * 1.8) * 0.12, v.z);
             } else {
               const inDeepWater =
-                waterSignedDistance(nextX, nextZ) < -3.5 && !isBridgeDeck(nextX, nextZ);
+                waterSignedDistance(nextX, nextZ) < -3.5 && !isBridgeDeck(nextX, nextZ) && !(isSky && (v.alt ?? 0) > 1);
               if (!inDeepWater) {
+                const kept = clampPlayable(nextX, nextZ);
                 const col = resolveBuildingCollision(
-                  THREE.MathUtils.clamp(nextX, WORLD_BOUNDS.minX, WORLD_BOUNDS.maxX),
-                  THREE.MathUtils.clamp(nextZ, WORLD_BOUNDS.minZ, WORLD_BOUNDS.maxZ),
+                  kept.x,
+                  kept.z,
                   v.type === 'ebike' ? 1.1 : 1.9,
                 );
                 v.x = col.x;
@@ -2855,11 +2845,36 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
               } else {
                 v.speed *= -0.4;
               }
-              const surfaceY = playableSurfaceHeightAt(v.x, v.z);
-              v.group.position.set(v.x, surfaceY, v.z);
-              v.wheels.forEach((w) => {
-                w.rotation.x += v.speed * dt * (v.type === 'ebike' ? 2.4 : 1.6);
+              const surfaceY = Math.max(isSky ? 0 : -Infinity, playableSurfaceHeightAt(v.x, v.z));
+              v.group.position.set(v.x, surfaceY + (isSky ? v.alt ?? 0 : 0), v.z);
+              if (v.type !== 'skyev') {
+                v.wheels.forEach((w) => {
+                  w.rotation.x += v.speed * dt * (v.type === 'ebike' ? 2.4 : 1.6);
+                });
+              }
+            }
+
+            if (v.type === 'skyev') {
+              // Wheels fold flat and spin as lift rotors; thrusters glow
+              v.wheels.forEach((axle) => {
+                axle.rotation.z = (Math.PI / 2) * (1 - airborne);
+                const tyre = axle.children[0];
+                if (tyre) tyre.rotation.y += (airborne > 0.5 ? 28 : v.speed * 2.7) * dt;
               });
+              v.glow?.forEach((m) => (m.opacity = airborne * (0.75 + Math.sin(elapsed * 30) * 0.08)));
+            }
+            // Light beam under any flying vehicle (as in the reference)
+            liftBeam.visible = isSky && airborne > 0.05;
+            if (liftBeam.visible) {
+              const h = Math.max(0.5, v.alt ?? 0);
+              liftBeam.scale.set(1, h, 1);
+              liftBeam.position.set(v.x, v.group.position.y - h / 2, v.z);
+              (liftBeam.material as THREE.MeshBasicMaterial).opacity = 0.22 * airborne;
+            }
+            if (isSky) {
+              // Nose follows the climb
+              v.group.rotation.x = THREE.MathUtils.damp(v.group.rotation.x, -(v.vAlt ?? 0) * 0.025 - airborne * v.speed * 0.002, 6, dt);
+              v.group.rotation.z = THREE.MathUtils.damp(v.group.rotation.z, -steerInput * airborne * 0.22, 6, dt);
             }
 
             v.group.rotation.y = v.heading;
@@ -2880,7 +2895,7 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
               hero.leftLeg.rotation.x = -0.55;
               hero.rightLeg.rotation.x = -0.55;
             } else {
-              v.group.rotation.z = 0;
+              if (!isSky) v.group.rotation.z = 0;
               hero.group.visible = false;
             }
 
@@ -3168,6 +3183,17 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
               );
               hero.group.position.set(sim.playerX, sim.playerY, sim.playerZ);
               hero.group.rotation.y = sim.playerHeading;
+            } else if (activities.isMovementLocked()) {
+              // Tubing: the activity moves the player; sit in the tube, arms on the rim
+              hero.leftLeg.rotation.x = -1.35;
+              hero.rightLeg.rotation.x = -1.35;
+              hero.leftArm.rotation.x = -0.5;
+              hero.rightArm.rotation.x = -0.5;
+              hero.leftArm.rotation.z = 0.5;
+              hero.rightArm.rotation.z = -0.5;
+              hero.bodyGroup.scale.set(1, 1, 1);
+              hero.group.position.set(sim.playerX, sim.playerY - 0.55, sim.playerZ);
+              hero.group.rotation.y = sim.playerHeading;
             } else {
             const maxSpeed = isSprinting && sim.stamina > 5 ? 15.0 : 10.5;
 
@@ -3231,8 +3257,9 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
               hero.rightArm.rotation.x = THREE.MathUtils.damp(hero.rightArm.rotation.x, 0, 12, dt);
             }
 
-            const rawNextX = THREE.MathUtils.clamp(sim.playerX + sim.playerVx * dt, WORLD_BOUNDS.minX, WORLD_BOUNDS.maxX);
-            const rawNextZ = THREE.MathUtils.clamp(sim.playerZ + sim.playerVz * dt, WORLD_BOUNDS.minZ, WORLD_BOUNDS.maxZ);
+            const nextFoot = clampPlayable(sim.playerX + sim.playerVx * dt, sim.playerZ + sim.playerVz * dt);
+            const rawNextX = nextFoot.x;
+            const rawNextZ = nextFoot.z;
             const footCol = resolveBuildingCollision(rawNextX, rawNextZ, 0.85);
             sim.playerX = footCol.x;
             sim.playerZ = footCol.z;
@@ -3474,42 +3501,18 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
             stationMarker.children[0].rotation.y += dt * 1.6;
             stationMarker.children[0].position.y = 1.1 + Math.sin(elapsed * 3) * 0.12;
 
-            // A loaded save may resume mid-delivery: give a fresh timer
-            if (carrying && stationTimer <= 0) stationTimer = STATION_QUEST.timeLimitSec;
-
-            if (carrying) {
-              stationTimer -= dt;
-              if (!stationWarned && stationTimer < 30) {
-                stationWarned = true;
-                showBanner('⏱ ခရီးဆောင်အိတ် ပို့ရန် စက္ကန့် ၃၀ သာ ကျန်ပါပြီ!', `${STATION_QUEST.hotelNameMm} သို့ အမြန်သွားပါ`);
-              }
-              if (stationTimer <= 0) {
-                qStation.progress = 0;
-                stationTimer = 0;
-                stationWarned = false;
-                soundEngine.playSplash(false);
-                showBanner(
-                  '⌛ အချိန်ကုန်သွားပါပြီ — ခရီးသည်က အိတ်ကို ပြန်ယူသွားပါပြီ',
-                  'မီးရထားဘူတာသို့ ပြန်သွားပြီး ထပ်ကြိုးစားပါ',
-                );
-              }
-            }
-
             if (Math.hypot(stop.x - sim.playerX, stop.z - sim.playerZ) < 4.5) {
               if (!carrying) {
                 qStation.progress = 1;
-                stationTimer = STATION_QUEST.timeLimitSec;
-                stationWarned = false;
                 soundEngine.playJadeCollect(2);
                 spawnBurst(stop.x, sim.playerY + 1.6, stop.z, '#f59e0b', 16);
                 showBanner(
                   '🧳 ခရီးဆောင်အိတ် ယူပြီးပါပြီ!',
-                  `${STATION_QUEST.hotelNameMm} သို့ စက္ကန့် ${STATION_QUEST.timeLimitSec} အတွင်း ပို့ပါ (GPS လမ်းညွှန်အတိုင်း)`,
+                  `${STATION_QUEST.hotelNameMm} သို့ ပို့ပေးပါ — အချိန်မကန့်သတ်ပါ`,
                 );
               } else {
                 qStation.progress = qStation.goal;
                 qStation.completed = true;
-                stationTimer = 0;
                 stationMarker.visible = false;
                 sim.jadeCount += qStation.rewardJade;
                 sim.score += 700;
@@ -3523,6 +3526,57 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
             }
           } else {
             stationMarker.visible = false;
+          }
+
+          activities.update({
+            dt,
+            elapsed,
+            playerX: sim.playerX,
+            playerY: sim.playerY,
+            playerZ: sim.playerZ,
+            vehicle: sim.activeVehicle ? sim.activeVehicle.type : 'none',
+            steer: THREE.MathUtils.clamp(
+              (heldKeys['KeyD'] || heldKeys['ArrowRight'] ? 1 : 0) -
+                (heldKeys['KeyA'] || heldKeys['ArrowLeft'] ? 1 : 0) +
+                sim.virtualStickX,
+              -1,
+              1,
+            ),
+          });
+
+          // Sky EV: flying high over a landmark earns its aerial view in the journal
+          const skyAlt = sim.activeVehicle?.alt ?? 0; // Sky EV or flying e-bike
+          if (skyAlt > 35) {
+            for (const place of JOURNAL_PLACES) {
+              const key = `aerial:${place.id}`;
+              if (sim.stamps.includes(key)) continue;
+              if (Math.hypot(place.x - sim.playerX, place.z - sim.playerZ) < place.radius * 1.6) {
+                sim.stamps = [...sim.stamps, key];
+                saveStamps(sim.stamps);
+                soundEngine.playJadeCollect(5);
+                showBanner(`✈ ${place.nameMm} ကို ကောင်းကင်ကနေ မြင်ရပြီ`, '📷 P (သို့) 📷 နှိပ်ပြီး ကောင်းကင်ဓာတ်ပုံ ရိုက်ပါ');
+              }
+            }
+          }
+
+          // Travel journal: the first visit to a landmark earns its stamp and a fact card
+          for (const place of JOURNAL_PLACES) {
+            if (sim.stamps.includes(place.id)) continue;
+            if (Math.hypot(place.x - sim.playerX, place.z - sim.playerZ) < place.radius) {
+              sim.stamps = [...sim.stamps, place.id];
+              saveStamps(sim.stamps);
+              sim.journalCard = {
+                placeId: place.id,
+                nameMm: place.nameMm,
+                nameEn: place.nameEn,
+                icon: place.icon,
+                ink: place.ink,
+                factsMm: place.factsMm,
+                found: sim.stamps.filter((st) => !st.startsWith('aerial:')).length,
+                total: JOURNAL_PLACES.length,
+              };
+              soundEngine.playQuestComplete();
+            }
           }
 
           // City Tour quest: visit landmarks in order (target follows the next stop)
@@ -3725,8 +3779,13 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
             sim.cameraYaw = Math.PI;
             sim.cameraYawTarget = Math.PI;
             _camTargetPos.set(sim.playerX, sim.playerY + 185, sim.playerZ + 12);
-            camera.position.lerp(_camTargetPos, 1 - Math.exp(-6.5 * dt));
             _camLookTarget.set(sim.playerX, sim.playerY, sim.playerZ);
+            // After a fast-travel jump (e.g. to Aung Myin Thar, 26 km away) snap instead of gliding
+            if (camera.position.distanceTo(_camTargetPos) > 400) {
+              camera.position.copy(_camTargetPos);
+              _smoothLookAt.copy(_camLookTarget);
+            }
+            camera.position.lerp(_camTargetPos, 1 - Math.exp(-6.5 * dt));
             _smoothLookAt.lerp(_camLookTarget, 1 - Math.exp(-10.0 * dt));
             camera.lookAt(_smoothLookAt);
           } else {
@@ -3761,7 +3820,12 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
               _camTargetPos.y = terrainUnderCam;
             }
 
-            // Smooth exponential camera position & lookAt damping (no abrupt snaps or wobble)
+            // Smooth exponential camera position & lookAt damping (no abrupt snaps or wobble),
+            // except right after a long fast-travel jump, where gliding would take seconds
+            if (camera.position.distanceTo(_camTargetPos) > 150) {
+              camera.position.copy(_camTargetPos);
+              _smoothLookAt.set(sim.playerX, sim.playerY + 1.8, sim.playerZ);
+            }
             camera.position.lerp(_camTargetPos, 1 - Math.exp(-6.5 * dt));
 
             _camLookTarget.set(
@@ -3783,6 +3847,27 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
       }
 
       renderer.render(scene, camera);
+
+      // Photo mode: the canvas holds this frame until it is composited, so grab it now
+      if (sim.photoRequest) {
+        sim.photoRequest = false;
+        const place = nearestPlace(sim.playerX, sim.playerZ);
+        const placeMm = place ? place.nameMm : 'မြို့ထဲ';
+        try {
+          const dataUrl = composePostcard(renderer.domElement, placeMm, TIME_LABEL_MM[sim.timeOfDay]);
+          const ok = addPostcard({
+            id: `pc_${Date.now()}`,
+            placeMm,
+            timeMm: TIME_LABEL_MM[sim.timeOfDay],
+            takenAt: Date.now(),
+            dataUrl,
+          });
+          soundEngine.playJadeCollect(3);
+          showBanner(ok ? '📷 Postcard သိမ်းပြီး' : '📷 ပုံရိုက်ပြီး (browser ထဲ မသိမ်းနိုင်ပါ)', `${placeMm} · ခရီးမှတ်တမ်းထဲမှာ ကြည့်ပါ`);
+        } catch {
+          showBanner('📷 ပုံရိုက်လို့ မရပါ', 'Browser က ခွင့်မပြုပါ');
+        }
+      }
 
       const nowMs = performance.now();
       fpsFrames++;
@@ -3835,20 +3920,6 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
           }
         }
         if (!nearInteractable) {
-          for (const spot of fishingSpots) {
-            if (Math.hypot(spot.x - sim.playerX, spot.z - sim.playerZ) < 12.5) {
-              nearInteractable = {
-                id: spot.id,
-                labelMm: sim.isFishing
-                  ? '🎣 ငါးမျှားဂိမ်း ကစားနေသည် [SPACE / E]'
-                  : `🎣 ${spot.nameMm} တွင် ငါးမျှားရန် [E]`,
-                labelEn: 'Start Ayeyarwady & Balaminhtin Bridge Fishing Mini-Game',
-              };
-              break;
-            }
-          }
-        }
-        if (!nearInteractable) {
           for (const drum of manauDrums) {
             if (!drum.activated && Math.hypot(drum.x - sim.playerX, drum.z - sim.playerZ) < 5.5) {
               nearInteractable = {
@@ -3874,52 +3945,23 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
         if (!nearInteractable) {
           for (const b of MYITKYINA_FAMOUS_BUILDINGS) {
             if (b.interactPromptMm && Math.hypot(b.x - sim.playerX, b.z - sim.playerZ) < 12.5) {
-              if (b.id === 'bldg_fish_shop_sitapu' || b.id === 'bldg_fish_shop_bridge') {
-                const basketSum = sim.fishingBasket.reduce((s, f) => s + f.priceMmk, 0);
-                nearInteractable = {
-                  id: b.id,
-                  labelMm:
-                    sim.fishingBasket.length > 0
-                      ? `💰 ငါး (${sim.fishingBasket.length}) ကောင် ရောင်းမည် (+${basketSum.toLocaleString()} MMK) [E]`
-                      : sim.fishingRodLevel === 0
-                        ? '🛒 အခြေခံ ဝါးငါးမျှားတံ ဝယ်မည် (30,000 MMK) [E]'
-                        : sim.fishingRodLevel < 3
-                          ? `⬆️ ငါးမျှားတံ Lv.${sim.fishingRodLevel + 1} အဆင့်မြှင့်မည် (${FISHING_GEAR_TIERS[sim.fishingRodLevel + 1].priceMmk.toLocaleString()} MMK) [E]`
-                          : `${b.nameMm} [E]`,
-                  labelEn: 'Sell Caught Fish for MMK or Buy/Upgrade Fishing Gear',
-                };
-              } else {
-                nearInteractable = {
-                  id: b.id,
-                  labelMm: b.interactPromptMm,
-                  labelEn: `${b.nameEn} — Restore HP & Stamina`,
-                };
-              }
+              if (b.id === 'bldg_fish_shop_sitapu' || b.id === 'bldg_fish_shop_bridge') continue;
+              nearInteractable = {
+                id: b.id,
+                labelMm: b.interactPromptMm,
+                labelEn: `${b.nameEn} — Restore HP & Stamina`,
+              };
               break;
             }
           }
         }
-        if (!nearInteractable && Math.hypot(sim.playerX - 68, sim.playerZ - 224) < 18) {
+        if (!nearInteractable && isAtSutaungpyaeTerrace(sim.playerX, sim.playerZ)) {
           nearInteractable = {
             id: 'pagoda_pray',
-            labelMm: '🙏 ဆုတောင်းပြည့်စေတီတွင် ရွှေသင်္ကန်းကပ်လှူ ဆုတောင်းရန် [E]',
+            labelMm: '🙏 ဆုတောင်းရန် [E]',
             labelEn: 'Offer Gold Leaf & Pray at Sutaungpyae Pagoda',
           };
         }
-        if (
-          !nearInteractable &&
-          !sim.activeVehicle &&
-          Math.hypot(sim.playerX, sim.playerZ - 7) < 22
-        ) {
-          nearInteractable = {
-            id: 'manau_dance',
-            labelMm: sim.isManauDancing
-              ? '💃 မနောအက ရပ်နားရန် [E]'
-              : '💃 မနောကွင်းတွင် ရိုးရာမနောအက သံစဉ်မစ်ရှင် ဝင်ကရန် [E]',
-            labelEn: 'Join Traditional Kachin Manau Rhythm Dance Quest',
-          };
-        }
-
         const minimapEntities: MinimapEntity[] = [
           ...enemies.map((e) => ({
             id: e.id,
@@ -4000,6 +4042,7 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
           activeVehicle: sim.activeVehicle ? sim.activeVehicle.type : 'none',
           nearVehicle,
           nearInteractable,
+          altitudeM: Math.round(sim.activeVehicle?.alt ?? 0),
           speedKmh: sim.activeVehicle
             ? Math.round(Math.abs(sim.activeVehicle.speed) * 3.2)
             : 0,
@@ -4019,6 +4062,20 @@ export const MyitkyinaCanvas: React.FC<Props> = ({ onHudUpdate, controllerRef })
           activeChallenge: sim.activeChallenge ? { ...sim.activeChallenge } : null,
           cameraMode: sim.cameraMode,
           isMuted: soundEngine.getMuted(),
+          activity: activities.hud(),
+          journal: {
+            stamps: JOURNAL_PLACES.map((p) => ({
+              id: p.id,
+              nameMm: p.nameMm,
+              nameEn: p.nameEn,
+              icon: p.icon,
+              ink: p.ink,
+              factsMm: p.factsMm,
+              found: sim.stamps.includes(p.id),
+              aerial: sim.stamps.includes(`aerial:${p.id}`),
+            })),
+            card: sim.journalCard,
+          },
           notification:
             sim.notification && nowMs - sim.notification.timestamp < 4200
               ? sim.notification

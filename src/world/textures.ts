@@ -92,6 +92,29 @@ export function concreteDetailTexture(): THREE.CanvasTexture {
   });
 }
 
+/** Track ballast: packed grey-brown stones. One tile ≈ 2 m. */
+export function gravelTexture(): THREE.CanvasTexture {
+  return make(256, (g, s) => {
+    g.fillStyle = 'rgb(128,122,112)';
+    g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 2600; i++) {
+      const v = Math.round(70 + rand() * 120);
+      const warm = Math.round(rand() * 14);
+      g.fillStyle = `rgb(${v + warm},${v + Math.round(warm / 2)},${v})`;
+      g.beginPath();
+      g.ellipse(rand() * s, rand() * s, 1.5 + rand() * 3, 1.2 + rand() * 2.4, rand() * 3, 0, Math.PI * 2);
+      g.fill();
+    }
+    // rust stains from the rails
+    for (let i = 0; i < 14; i++) {
+      g.fillStyle = 'rgba(110,60,30,0.10)';
+      g.beginPath();
+      g.arc(rand() * s, rand() * s, 10 + rand() * 24, 0, Math.PI * 2);
+      g.fill();
+    }
+  });
+}
+
 /** Red brick with mortar. One tile = 1 m wide × 0.5 m tall (≈ 4 × 6 courses). */
 export function brickTexture(): THREE.CanvasTexture {
   return make(256, (g, s) => {

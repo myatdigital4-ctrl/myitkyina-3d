@@ -145,6 +145,44 @@ const toWorld = (lat, lng) => {
 };
 const cToWorld = (p) => ({ x: p.x - manau.x, z: p.z - manau.z });
 
+// --- Railway station complex (modeled by hand in src/world/railwayStation.ts) ---
+// Local frame: u across the tracks (+ toward Tha Khin Net Hpay St), v along them (+ south).
+// Keep in sync with STATION in railwayStation.ts.
+const STATION = { x: -716.75, z: 2391.1, th: 0.063 };
+function stationLocal(w) {
+  const dx = w.x - STATION.x;
+  const dz = w.z - STATION.z;
+  const c = Math.cos(STATION.th);
+  const s = Math.sin(STATION.th);
+  return { u: dx * c - dz * s, v: dx * s + dz * c };
+}
+/** Rail corridor west of the station building, plus the forecourt in front of it */
+function inStationYard(w) {
+  const { u, v } = stationLocal(w);
+  if (u > -58 && u < -9 && v > -135 && v < 160) return true;
+  return u > 8 && u < 42 && v > -35 && v < 35;
+}
+// Sutaungpyae Pagoda compound (modeled by hand in src/world/sutaungpyae.ts); world meters
+const PAGODA = { x: -49.2, z: 529.0 };
+function inPagodaCompound(w) {
+  const dx = w.x - PAGODA.x;
+  const dz = w.z - PAGODA.z;
+  if (dx > -31 && dx < 33 && dz > -58 && dz < 60) return true; // halls, terrace, courtyard, gate
+  return dx > -64 && dx < -26 && dz > 46 && dz < 66; // reclining Buddha shed
+}
+function pagodaDist(w) {
+  const dx = w.x - PAGODA.x;
+  const dz = w.z - PAGODA.z;
+  return Math.hypot(Math.max(-64 - dx, 0, dx - 33), Math.max(-58 - dz, 0, dz - 66));
+}
+/** Distance from a point to the whole station complex rectangle (0 inside) */
+function stationComplexDist(w) {
+  const { u, v } = stationLocal(w);
+  const du = Math.max(-58 - u, 0, u - 44);
+  const dv = Math.max(-135 - v, 0, v - 160);
+  return Math.hypot(du, dv);
+}
+
 // --- Clip features ----------------------------------------------------------
 const PLAZA_CLEAR = 50; // dance circle + ring road (radius ~48 m)
 const kept = [];
@@ -319,6 +357,8 @@ let msOnRoad = 0;
     const cC = centroidC(f);
     const cw = cToWorld(cC);
     if (PARK_CUSTOM.some(([px, pz]) => Math.hypot(cw.x - px, cw.z - pz) < 9)) continue;
+    if (inStationYard(cw)) continue; // tracks, platforms and forecourt are modeled by hand
+    if (inPagodaCompound(cw)) continue; // Sutaungpyae Pagoda compound is modeled by hand
     if (!inArea(cC)) continue;
     if (waterDistC(cC.x, cC.z) < 5) continue;
     const c = cToWorld(cC);
@@ -412,7 +452,7 @@ for (let x = WB0.x + 60; x <= WB1.x - 60; x += 8) {
     if (Math.hypot(x, z) < 75) continue;
     const p = { x, z };
     const R = 40;
-    let clear = R;
+    let clear = Math.min(R, stationComplexDist(p), pagodaDist(p)); // no trees or game lots on the rail yard
     for (const i of bldgGrid.near(x, z, R)) {
       if (clear <= 9) break;
       const b = bldgBoxes[i];

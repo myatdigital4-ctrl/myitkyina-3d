@@ -1,6 +1,14 @@
 # Myitkyina: Emerald Confluence (မြစ်ကြီးနား Open World)
 
-A 3D open-world exploration game set in Myitkyina, Kachin State, built with React, Three.js and Vite. Walk, ride an e-bike, drive a 4x4 or take a riverboat around Manau Park, Balaminhtin Bridge, the Ayeyarwady riverfront and the Myitsone Confluence.
+A relaxing 3D exploration game set in Myitkyina, Kachin State, built with React, Three.js and Vite. Walk, ride an e-bike or drive around a 1:1 rebuild of downtown Myitkyina and visit its landmarks.
+
+**Version 2 — Relax and Explore:** no timers, combat or ways to lose. The landmarks are rebuilt from Google Maps (satellite, visitor and 360° photos): Manau Park, Myitkyina Railway Station, Sutaungpyae Pagoda and the Aung Myin Thar recreation area (a separate area 26 km north on the Myitsone road, reached from the Landmarks menu). Fishing, races, timed deliveries, enemies and the Manau rhythm mini-game from v1 were removed.
+
+- **Activities & mini-games** (glowing markers at the landmarks, or Menu → 🌿 လည်ပတ်ရန်): 🎫 ticket counter at the station (stations on the Mandalay–Myitkyina line), 🛵 e-bike city ride through rings, ✈ Sky EV sky tour, 🪶 Manau dance line around the poles, 🙏 birthday-corner water offering at Sutaungpyae (the eight weekday planetary posts), 🛟 tubing down the Aung Myin Thar stream. No failing; best times and scores are saved.
+- **Travel journal (J):** a stamp and a short fact card for each landmark, plus an aerial stamp when you fly over it.
+- **Postcards (P / 📷):** saves the current view with a caption; download them from the journal.
+- **Kachin Sky EV (ကချင်မိုးပျံ EV):** a flying electric car parked at the station. Space / ⬆ climbs, Q / ⬇ descends; its wheels fold into lift rotors.
+- **Street traffic** follows 2026 photos of Myitkyina: red three-wheel trucks with green canopies, bicycle trishaws, white Toyotas, the green-and-white bus and cargo trucks.
 
 It runs in the browser on desktop and phones (landscape), and installs as a PWA.
 
@@ -41,10 +49,10 @@ Without a key the game still works and uses the built-in 3D radar map.
 | Shift | Push joystick to edge | Sprint |
 | Space | Jump button | Jump / brake |
 | Mouse drag | Swipe right side of screen | Look around |
-| E | Talk / hit button | Talk, drum, fish, attack |
+| E | Talk button | Talk to locals, rest at shops, pray at the pagoda |
 | F | Vehicle button | Get in / out of vehicle |
 | N | Map button | Full map |
-| H | Menu button | Mini-games, shops, landmarks |
+| H | Menu button | Scenic routes, landmarks, vehicles, time of day |
 | C / R | — | Change camera / reset camera |
 | M | — | Mute |
 | Esc | ⏸ | Pause, save, settings |

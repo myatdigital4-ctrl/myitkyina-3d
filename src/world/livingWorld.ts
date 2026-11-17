@@ -16,6 +16,7 @@ import {
   riverHalfWidth,
 } from './terrain';
 import { nearestStreetPoint, relocateLegacy, roadsidePoint } from './worldLayout';
+import { buildCargoTruck, buildThreeWheeler, buildTownBus, buildTrishaw, buildWhiteSUV } from './myitkyinaVehicles';
 
 // ============================================================================
 // 1. ULTRA-HIGH-FIDELITY ATMOSPHERIC SKY DOME, VOLUMETRIC CLOUDS, STREETLAMPS
@@ -31,6 +32,8 @@ export interface SkyAndWeatherController {
     playerZ: number,
     timeOfDay: TimeOfDay,
     weather: WeatherMode,
+    /** Direction toward the sun (same as the sun light), so the disc and glow match the shadows */
+    sunDir?: THREE.Vector3,
   ) => void;
 }
 
@@ -41,7 +44,7 @@ export function createSkyAndWeatherSystem(
   const group = new THREE.Group();
 
   // A. Procedural Atmospheric Gradient Sky Dome (No flat background color)
-  const skyGeo = new THREE.SphereGeometry(1180, 32, 20);
+  const skyGeo = new THREE.SphereGeometry(840, 48, 24);
   const skyUniforms = {
     uTopColor: { value: new THREE.Color('#0284c7') },
     uHorizonColor: { value: new THREE.Color('#bae6fd') },
@@ -69,12 +72,22 @@ export function createSkyAndWeatherSystem(
       uniform vec3 uSunGlowColor;
 
       void main() {
-        vec3 dir = normalize(vWorldPos);
+        vec3 dir = normalize(vWorldPos - cameraPosition);
         float h = clamp(dir.y * 1.45, 0.0, 1.0);
         vec3 col = mix(uHorizonColor, uTopColor, pow(h, 0.65));
         float sunAmt = max(dot(dir, uSunDir), 0.0);
-        col += uSunGlowColor * pow(sunAmt, 14.0) * 0.48;
-        col += uSunGlowColor * smoothstep(0.996, 0.9995, sunAmt) * 1.2;
+        float lowSun = 1.0 - smoothstep(0.05, 0.45, uSunDir.y);
+        // warm band along the horizon on the sun's side
+        col = mix(col, uSunGlowColor, pow(sunAmt, 3.0) * (1.0 - h) * 0.55 * lowSun);
+        // wide glow and tight halo
+        col += uSunGlowColor * pow(sunAmt, 10.0) * 0.45;
+        col += uSunGlowColor * pow(sunAmt, 180.0) * 0.9;
+        // the sun disc itself (~2 degrees across), slightly redder when low
+        float disc = smoothstep(0.99925, 0.99950, sunAmt);
+        vec3 discCol = mix(vec3(1.0, 0.97, 0.88), vec3(1.0, 0.72, 0.38), lowSun);
+        col = mix(col, discCol * 1.6, disc);
+        // ground below the horizon fades to the horizon color
+        col = mix(col, uHorizonColor * 0.85, smoothstep(0.0, -0.08, dir.y));
         gl_FragColor = vec4(col, 1.0);
       }
     `,
@@ -248,9 +261,11 @@ export function createSkyAndWeatherSystem(
     playerZ: number,
     timeOfDay: TimeOfDay,
     weather: WeatherMode,
+    sunDir?: THREE.Vector3,
   ) => {
     // Keep sky dome centered on player so horizon is infinite
     skyDome.position.set(playerX, 0, playerZ);
+    if (sunDir) skyUniforms.uSunDir.value.copy(sunDir).normalize();
     cloudGroup.rotation.y = elapsed * 0.008;
 
     // Sky gradient colors based on TimeOfDay & Weather
@@ -263,17 +278,18 @@ export function createSkyAndWeatherSystem(
       skyUniforms.uHorizonColor.value.set('#e2e8f0');
       skyUniforms.uSunGlowColor.value.set('#fde047');
     } else if (timeOfDay === 'morning') {
-      skyUniforms.uTopColor.value.set('#0284c7');
-      skyUniforms.uHorizonColor.value.set('#bae6fd');
-      skyUniforms.uSunGlowColor.value.set('#fef08a');
+      skyUniforms.uTopColor.value.set('#3f86c6');
+      skyUniforms.uHorizonColor.value.set('#f3e2c8');
+      skyUniforms.uSunGlowColor.value.set('#ffd38a');
     } else if (timeOfDay === 'noon') {
       skyUniforms.uTopColor.value.set('#0369a1');
       skyUniforms.uHorizonColor.value.set('#7dd3fc');
       skyUniforms.uSunGlowColor.value.set('#ffffff');
     } else if (timeOfDay === 'sunset') {
-      skyUniforms.uTopColor.value.set('#7c2d12');
-      skyUniforms.uHorizonColor.value.set('#fb923c');
-      skyUniforms.uSunGlowColor.value.set('#fde047');
+      // Golden hour over the town: blue-violet above, peach at the horizon, orange around the sun
+      skyUniforms.uTopColor.value.set('#3d4a7a');
+      skyUniforms.uHorizonColor.value.set('#f2b48a');
+      skyUniforms.uSunGlowColor.value.set('#ff9a3c');
     } else {
       skyUniforms.uTopColor.value.set('#020617');
       skyUniforms.uHorizonColor.value.set('#1e293b');
@@ -340,7 +356,7 @@ export function createSkyAndWeatherSystem(
 // ============================================================================
 export interface AITrafficAgent {
   id: string;
-  kind: 'ebike_a5' | 'ebike_white' | 'crown_sedan' | 'tuktuk';
+  kind: 'ebike_a5' | 'ebike_white' | 'crown_sedan' | 'tuktuk' | 'three_wheeler' | 'trishaw' | 'bus' | 'cargo_truck' | 'suv';
   segIndex: number;
   t: number; // 0..1 along road segment
   dir: 1 | -1;
@@ -589,8 +605,14 @@ export function createLivingCityTraffic(renderer: THREE.WebGLRenderer): {
   const spawnPool = segs
     .map((sg, i) => ({ i, len: Math.hypot(sg.x2 - sg.x1, sg.z2 - sg.z1) }))
     .filter((e) => isPaved(e.i) && e.len > 35);
-  const kinds: AITrafficAgent['kind'][] = ['ebike_a5', 'crown_sedan', 'ebike_white', 'ebike_a5', 'crown_sedan'];
-  const colors = ['#dc2626', '#f8fafc', '#059669', '#2563eb', '#1e293b', '#d97706', '#e2e8f0', '#991b1b'];
+  // Mix from 2026 Myitkyina street photos: motorbikes, three-wheelers, white Toyotas, trishaws,
+  // the green-and-white bus and cargo trucks
+  const kinds: AITrafficAgent['kind'][] = [
+    'ebike_a5', 'three_wheeler', 'crown_sedan', 'trishaw', 'suv', 'ebike_white',
+    'cargo_truck', 'three_wheeler', 'bus', 'crown_sedan', 'ebike_a5', 'suv',
+  ];
+  // White and silver dominate Myitkyina's cars
+  const colors = ['#f8fafc', '#e2e8f0', '#f8fafc', '#9ca3af', '#1e293b', '#f8fafc', '#dc2626', '#e2e8f0'];
   const trafficSpecs: {
     segIndex: number;
     t: number;
@@ -600,7 +622,7 @@ export function createLivingCityTraffic(renderer: THREE.WebGLRenderer): {
     color: string;
   }[] = [];
   const usedSpawn: { x: number; z: number }[] = [];
-  for (let tries = 0; trafficSpecs.length < 18 && tries < 500; tries++) {
+  for (let tries = 0; trafficSpecs.length < 24 && tries < 600; tries++) {
     const e = spawnPool[Math.floor(rng() * Math.min(spawnPool.length, 60 + tries * 4))];
     if (!e) break;
     const sg = segs[e.i];
@@ -614,7 +636,14 @@ export function createLivingCityTraffic(renderer: THREE.WebGLRenderer): {
       t: 0.2 + rng() * 0.6,
       dir: rng() > 0.5 ? 1 : -1,
       kind,
-      speed: kind === 'crown_sedan' ? 11 + rng() * 4 : 8 + rng() * 3,
+      speed:
+        kind === 'crown_sedan' || kind === 'suv'
+          ? 11 + rng() * 4
+          : kind === 'trishaw'
+            ? 3.5 + rng()
+            : kind === 'bus' || kind === 'cargo_truck'
+              ? 8 + rng() * 2
+              : 8 + rng() * 3,
       color: colors[trafficSpecs.length % colors.length],
     });
   }
@@ -661,7 +690,17 @@ export function createLivingCityTraffic(renderer: THREE.WebGLRenderer): {
     const built =
       spec.kind === 'crown_sedan'
         ? createCrownSedanMesh(spec.color, shadowTex)
-        : createAIEBikeWithRiderMesh(spec.kind === 'ebike_white', spec.color, shadowTex);
+        : spec.kind === 'suv'
+          ? buildWhiteSUV(spec.color === '#1e293b' ? '#1e293b' : '#f2f3f1')
+          : spec.kind === 'three_wheeler'
+            ? buildThreeWheeler()
+            : spec.kind === 'trishaw'
+              ? buildTrishaw()
+              : spec.kind === 'bus'
+                ? buildTownBus()
+                : spec.kind === 'cargo_truck'
+                  ? buildCargoTruck()
+                  : createAIEBikeWithRiderMesh(spec.kind === 'ebike_white', spec.color, shadowTex);
 
     group.add(built.group);
 

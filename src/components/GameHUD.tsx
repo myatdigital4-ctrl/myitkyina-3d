@@ -23,6 +23,9 @@ import { SaveSummary, formatSavedAgoMm, getSaveSummary } from '../save/saveSyste
 import { getSettings, updateSettings } from '../settings/gameSettings';
 import { ControlsTutorial } from './ControlsTutorial';
 import { SettingsPanel } from './SettingsPanel';
+import { DiscoveryCard, JournalPanel } from './JournalPanel';
+import { ActivityList, ActivityPanel } from './ActivityPanel';
+import { ClockWidget, CompassStrip, DriveControls, IconButton, SpeedPanel, glass } from './ModernHud';
 
 interface Props {
   hud: HUDState;
@@ -58,11 +61,14 @@ function roadStrokeColor(surface: RoadSurfaceType): string {
   }
 }
 
+/** Landmarks rebuilt from Google Maps for V2 (the rest of the city comes later) */
+const V2_LANDMARK_IDS = ['railway_station', 'manau_park', 'pagoda_riverfront', 'aung_myin_thar'];
+
 export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeDockTab, setActiveDockTab] = useState<
-    'minigames' | 'osm3d' | 'shops' | 'landmarks' | 'vehicles' | 'world'
-  >('minigames');
+    'explore' | 'landmarks' | 'vehicles' | 'world'
+  >('explore');
   const [showMinimap, setShowMinimap] = useState(true);
   const [minimapMode, setMinimapMode] = useState<'radar3d' | 'satellite'>('radar3d');
   const [fullMapMode, setFullMapMode] = useState<'satellite' | 'vector'>('vector');
@@ -80,6 +86,7 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
   }, [hud.phase]);
   const [sprintLocked, setSprintLocked] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [journalOpen, setJournalOpen] = useState(false);
   const [musicOpen, setMusicOpen] = useState(false);
 
   // --- Map layers -------------------------------------------------------------
@@ -237,6 +244,18 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
     <>
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
       {tutorialOpen && <ControlsTutorial onClose={closeTutorial} />}
+      {journalOpen && <JournalPanel journal={hud.journal} onClose={() => setJournalOpen(false)} />}
+      {hud.phase === 'playing' && <ActivityPanel activity={hud.activity} ctl={controllerRef.current} />}
+      {hud.phase === 'playing' && hud.journal.card && !journalOpen && !hud.activity.active && (
+        <DiscoveryCard
+          card={hud.journal.card}
+          onClose={() => controllerRef.current?.closeJournalCard()}
+          onPhoto={() => {
+            controllerRef.current?.closeJournalCard();
+            controllerRef.current?.takePhoto();
+          }}
+        />
+      )}
     </>
   );
   const stickBaseRef = useRef<HTMLDivElement | null>(null);
@@ -274,6 +293,10 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
         setDrawerOpen((prev) => !prev);
       } else if (e.code === 'KeyN' && hud.phase === 'playing') {
         setFullMapOpen((prev) => !prev);
+      } else if (e.code === 'KeyJ' && hud.phase === 'playing') {
+        setJournalOpen((prev) => !prev);
+      } else if (e.code === 'KeyP' && hud.phase === 'playing') {
+        controllerRef.current?.takePhoto();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -541,7 +564,7 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
               fontWeight="700"
               fontSize="18"
             >
-              Google Earth ဂြိုဟ်တုမြေပုံ · လမ်းမကြီးများနှင့် နာမည်ကြီးဆိုင်များ
+              Relax and Explore · အေးအေးဆေးဆေး လှည့်လည်ကြည့်ရှု · v2
             </text>
             <line
               x1="100"
@@ -564,7 +587,7 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
           {saveSummary && (
             <div className="mb-2.5 inline-flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-1.5 rounded-lg bg-slate-900/85 border border-emerald-500/30 text-[10px] md:text-xs text-slate-200">
               <span className="font-semibold text-emerald-300">💾 သိမ်းထားသောဂိမ်း</span>
-              <span>💰 {saveSummary.moneyMmk.toLocaleString()} MMK</span>
+              <span>📔 ခရီးမှတ်တမ်း {hud.journal.stamps.filter((st) => st.found).length}/{hud.journal.stamps.length}</span>
               <span>
                 ✅ မစ်ရှင် {saveSummary.questsCompleted}/{saveSummary.questsTotal}
               </span>
@@ -674,78 +697,29 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
   const isDriving = hud.activeVehicle !== 'none';
   const stickSizeClass = isCompactLandscape ? 'w-[96px] h-[96px]' : 'w-32 h-32 md:w-36 md:h-36';
   const knobSizeClass = isCompactLandscape ? 'w-10 h-10' : 'w-12 h-12';
+  // Round glassy touch buttons (V2 style)
   const actionBtnClass = isCompactLandscape
-    ? 'min-w-[56px] min-h-[36px] px-2 py-1 text-[11px]'
-    : 'min-w-[72px] min-h-[50px] px-3 py-2 text-xs';
+    ? 'w-14 h-14 px-1 text-[10px] leading-tight flex items-center justify-center text-center'
+    : 'w-[70px] h-[70px] px-1.5 text-[11px] leading-tight flex items-center justify-center text-center';
 
   return (
     <div className="fixed inset-0 z-10 pointer-events-none select-none overflow-hidden">
-      {/* SINGLE-ROW ULTRA-SLIM TOP BAR */}
-      <div className="fixed top-1.5 left-2 right-2 z-20 flex items-center justify-between gap-1.5 pointer-events-none">
-        {/* Left Status Bar */}
-        <div className="pointer-events-auto flex items-center gap-2 bg-[#0b1318]/92 border border-white/15 rounded-md px-2.5 py-1 shadow-md shrink-0">
-          <div className="flex items-center gap-1">
-            <svg
-              className="w-3.5 h-3.5 text-rose-500 shrink-0"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-            >
-              <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
-            </svg>
-            <span className="text-[11px] font-bold font-mono-tabular text-white">
-              {hud.health}
-            </span>
-          </div>
-
-          <span className="text-slate-600" aria-hidden="true">
-            ·
-          </span>
-
-          <div
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-950/90 border border-emerald-400/50"
-            title="လက်ရှိ မြန်မာကျပ်ငွေ လက်ကျန် (Myanmar Kyat Balance)"
-          >
-            <span className="text-[11px]">💵</span>
-            <span className="text-[11px] font-extrabold font-mono-tabular text-emerald-300 whitespace-nowrap">
-              {hud.jadeCount.toLocaleString()} MMK
-            </span>
-          </div>
-
-          <span className="text-slate-600" aria-hidden="true">
-            ·
-          </span>
-
-          <button
-            onClick={() => controllerRef.current?.upgradeHeroLevel()}
-            className="px-1.5 py-0.5 rounded bg-emerald-600/90 hover:bg-emerald-500 border border-emerald-300/60 text-[10px] font-bold text-white cursor-pointer whitespace-nowrap"
-            title="40,000 MMK သုံး၍ စွမ်းရည်နှင့် ဆိုင်ကယ်အမြန်နှုန်း အဆင့်မြှင့်ရန်"
-          >
-            ⚡ Lv.{hud.meritLevel} (40k MMK)
-          </button>
-
-          <span className="text-slate-600 hidden md:inline" aria-hidden="true">
-            ·
-          </span>
-
-          <span className="text-[11px] font-semibold text-amber-300 truncate max-w-[110px] sm:max-w-[150px] hidden md:inline">
-            {hud.currentRegion.nameMm}
-          </span>
-
-          {isDriving && (
-            <>
-              <span className="text-slate-600" aria-hidden="true">
-                ·
-              </span>
-              <span className="text-[11px] font-bold font-mono-tabular text-sky-300">
-                {hud.speedKmh} km/h
-              </span>
-            </>
-          )}
-        </div>
-
-        {/* Right Compact Action Strip — scrolls sideways on narrow screens; ⛶ ⚙ ⏸ always stay visible */}
-        <div className="flex items-center gap-1 min-w-0">
-        <div className="pointer-events-auto flex items-center gap-1 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0">
+      {/* V2 TOP HUD: clock (left), compass (center), icon buttons + minimap (right) */}
+      <div className="fixed top-2 left-2 z-20 pointer-events-auto flex items-start gap-2">
+        <ClockWidget tod={hud.timeOfDay} region={hud.currentRegion.nameMm} />
+        <button
+          onClick={() => setJournalOpen(true)}
+          title="ခရီးမှတ်တမ်း (J)"
+          className={`h-10 min-w-10 px-2 rounded-xl flex items-center justify-center gap-1 text-[13px] font-bold cursor-pointer ${glass}`}
+        >
+          📔 {hud.journal.stamps.filter((st) => st.found).length}
+        </button>
+      </div>
+      <div className="fixed top-1.5 left-1/2 -translate-x-1/2 z-20 pointer-events-none hidden sm:block">
+        <CompassStrip cameraYaw={hud.cameraYaw} />
+      </div>
+      <div className="fixed top-2 right-2 z-20 pointer-events-auto flex items-start gap-1.5">
+        <div className="hidden">
           <input
             ref={customSongInputRef}
             type="file"
@@ -773,46 +747,21 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
             }}
           />
 
-          {/* Everything else lives in the menu (H / bottom button) to keep the view clean */}
-          <button
-            onClick={() => setFullMapOpen(true)}
-            className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-[#0b1318]/80 border border-white/15 text-slate-100 cursor-pointer whitespace-nowrap"
-            title="Map (N)"
-          >
-            🗺 မြေပုံ
-          </button>
         </div>
-
-        <div className="pointer-events-auto flex items-center gap-1 shrink-0">
-          <button
-            onClick={requestLandscapeFullscreen}
-            className="px-2 py-1 bg-[#0b1318]/92 border border-white/15 rounded text-[11px] text-slate-200 cursor-pointer"
-            title="Fullscreen"
-          >
-            ⛶
-          </button>
-
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="px-2 py-1 bg-[#0b1318]/92 border border-white/15 rounded text-[11px] text-slate-200 cursor-pointer"
-            title="Settings"
-            aria-label="Settings"
-          >
-            ⚙
-          </button>
-
-          <button
-            onClick={() => controllerRef.current?.pauseGame()}
-            className="px-2 py-1 bg-[#0b1318]/92 border border-white/15 rounded text-[11px] font-semibold text-slate-200 cursor-pointer"
-          >
-            ⏸
-          </button>
-        </div>
-        </div>
+        <IconButton onClick={() => { setActiveDockTab('explore'); setDrawerOpen(true); }} title="လုပ်ဆောင်ချက်များ">🚩</IconButton>
+        <IconButton onClick={() => controllerRef.current?.takePhoto()} title="ဓာတ်ပုံရိုက် (P)">📷</IconButton>
+        <IconButton onClick={() => controllerRef.current?.resetCameraBehindPlayer()} title="ကင်မရာ ပြန်ချိန်">🧭</IconButton>
+        <IconButton onClick={requestLandscapeFullscreen} title="Fullscreen">⛶</IconButton>
+        <IconButton onClick={() => controllerRef.current?.pauseGame()} title="ခေတ္တရပ် / ဆက်တင်">⏸</IconButton>
       </div>
+      {isDriving && (
+        <div className="fixed left-3 top-1/2 -translate-y-[85%] z-20 pointer-events-none">
+          <SpeedPanel vehicle={hud.activeVehicle} speedKmh={hud.speedKmh} altitudeM={hud.altitudeM} />
+        </div>
+      )}
 
       {/* TOP-LEFT COMPACT ACTIVE MISSION TRACKER + E-BIKE & FESTIVAL MUSIC PLAYER */}
-      <div className="fixed top-9 left-2 z-20 flex flex-col gap-1.5 pointer-events-auto max-w-[340px] sm:max-w-[420px]">
+      <div className="fixed top-[62px] left-2 z-20 flex flex-col gap-1.5 pointer-events-auto max-w-[340px] sm:max-w-[420px]">
         <div className="flex items-center gap-1.5">
           <div className="bg-[#0b1318]/92 border border-emerald-500/45 rounded-md px-2.5 py-1 flex items-center gap-2 shadow-lg min-w-0">
             <div className="min-w-0">
@@ -1106,324 +1055,13 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
             </div>
           </div>
         )}
-        {hud.isManauDancing && (
-          <div className="pointer-events-auto w-full max-w-md bg-[#0b1318]/96 border-2 border-amber-400 rounded-xl p-2.5 shadow-2xl">
-            {/* Header: Title, Quest Progress & Stop Button */}
-            <div className="flex items-center justify-between gap-2 mb-1.5">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="text-xs font-extrabold text-amber-300 truncate">
-                  💃 မနောအက သံစဉ်ချက် မစ်ရှင် ({Math.min(hud.manauRhythm.hitsCompleted, hud.manauRhythm.hitsGoal)}/{hud.manauRhythm.hitsGoal})
-                </span>
-                {hud.manauRhythm.streak > 1 && (
-                  <span className="px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 text-[10px] font-extrabold shrink-0">
-                    🔥 {hud.manauRhythm.streak}x
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={() => controllerRef.current?.toggleManauDance()}
-                className="px-2 py-0.5 rounded bg-rose-700 hover:bg-rose-600 border border-rose-300 text-[10px] font-bold text-white cursor-pointer shrink-0"
-              >
-                ✕ အကရပ်မည်
-              </button>
-            </div>
-
-            {/* Rhythm Beat Timing Bar + Sweet Spot Target Window */}
-            <div className="relative h-5 w-full rounded-full bg-slate-900 border border-white/20 overflow-hidden mb-1.5">
-              {/* Sweet Spot Hit Zone (55% to 96%) */}
-              <div
-                className="absolute top-0 bottom-0 bg-gradient-to-r from-emerald-500/35 via-amber-400/55 to-emerald-500/35 border-x-2 border-amber-300"
-                style={{ left: '55%', width: '41%' }}
-              />
-              <div
-                className="absolute top-0.5 bottom-0.5 flex items-center justify-center text-[9px] font-extrabold text-amber-200 pointer-events-none"
-                style={{ left: '55%', width: '41%' }}
-              >
-                ★ နှိပ်ရန် စည်းချက်ဇုန် (HIT ZONE) ★
-              </div>
-
-              {/* Moving Musical Beat Pulse Marker */}
-              <div
-                className="absolute top-0.5 bottom-0.5 w-4 -ml-2 rounded-full bg-white border-2 border-amber-400 shadow-lg transition-all duration-75"
-                style={{ left: `${Math.round(hud.manauRhythm.beatProgress * 100)}%` }}
-              />
-            </div>
-
-            {/* Current Target Prompt & Upcoming Queue */}
-            <div className="flex items-center justify-between gap-2 text-[10px] mb-2">
-              <div
-                className={`font-bold truncate ${
-                  hud.manauRhythm.lastRating === 'PERFECT'
-                    ? 'text-amber-300'
-                    : hud.manauRhythm.lastRating === 'GOOD'
-                      ? 'text-emerald-300'
-                      : hud.manauRhythm.lastRating === 'MISS'
-                        ? 'text-rose-400'
-                        : 'text-slate-200'
-                }`}
-              >
-                {hud.manauRhythm.lastRatingTextMm}
-              </div>
-              <div className="flex items-center gap-1 shrink-0 text-slate-400">
-                <span>နောက်ချက်:</span>
-                {hud.manauRhythm.upcomingQueue.map((k, idx) => (
-                  <span
-                    key={idx}
-                    className="px-1.5 py-0.5 rounded bg-slate-800 border border-white/15 text-[10px] font-bold text-amber-200"
-                  >
-                    {k === 'left' ? '◀' : k === 'up' ? '▲' : k === 'down' ? '▼' : '▶'}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {/* 4 Interactive Rhythm Dance Buttons (Touch + Mouse + Keyboard A/W/S/D or Arrows) */}
-            <div className="grid grid-cols-4 gap-1.5">
-              {(
-                [
-                  { key: 'left' as ManauBeatKey, icon: '◀', label: 'ဘယ်ယပ်', kb: 'A / ←' },
-                  { key: 'up' as ManauBeatKey, icon: '▲', label: 'မြှောက်', kb: 'W / ↑' },
-                  { key: 'down' as ManauBeatKey, icon: '▼', label: 'စည်ချက်', kb: 'S / ↓' },
-                  { key: 'right' as ManauBeatKey, icon: '▶', label: 'ညာယပ်', kb: 'D / →' },
-                ]
-              ).map((btn) => {
-                const isTarget = hud.manauRhythm.currentBeatKey === btn.key;
-                const inHitWindow =
-                  isTarget &&
-                  hud.manauRhythm.beatProgress >= 0.48 &&
-                  hud.manauRhythm.beatProgress <= 0.98;
-                return (
-                  <button
-                    key={btn.key}
-                    onPointerDown={(e) => {
-                      e.stopPropagation();
-                      controllerRef.current?.pressManauRhythmKey(btn.key);
-                    }}
-                    className={`py-1.5 px-1 rounded-lg border-2 flex flex-col items-center justify-center transition-transform active:scale-90 cursor-pointer touch-none ${
-                      inHitWindow
-                        ? 'bg-amber-400 border-white text-slate-950 shadow-lg scale-105'
-                        : isTarget
-                          ? 'bg-emerald-700/90 border-amber-300 text-white shadow'
-                          : 'bg-slate-900/90 border-white/20 text-slate-200 hover:border-white/40'
-                    }`}
-                  >
-                    <span className="text-sm font-extrabold leading-none">
-                      {btn.icon} {btn.label}
-                    </span>
-                    <span
-                      className={`text-[9px] font-mono-tabular mt-0.5 ${
-                        inHitWindow ? 'text-slate-900 font-bold' : 'text-slate-400'
-                      }`}
-                    >
-                      [{btn.kb}]
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* =========================================================================
-            AYEYARWADY RIVERBANK & UNDER BALAMINHTIN BRIDGE FISHING + FISH SHOP HUD
-           ========================================================================= */}
-        {hud.fishing.active && (
-          <div className="pointer-events-auto w-full max-w-md bg-[#08161d]/96 border-2 border-sky-400 rounded-xl p-2.5 shadow-2xl">
-            {/* Header: Spot Name + Balance + Exit */}
-            <div className="flex items-center justify-between gap-1.5 mb-1.5">
-              <div className="min-w-0">
-                <div className="text-xs font-extrabold text-sky-300 truncate">
-                  🎣 {hud.fishing.spotNameMm}
-                </div>
-                <div className="text-[9px] text-slate-300 truncate">
-                  ရောင်းပြီးငါး: <strong className="text-emerald-300">{hud.fishing.totalSoldCount}</strong> ကောင် · စုစုပေါင်းရငွေ:{' '}
-                  <strong className="text-amber-300 font-mono-tabular">
-                    {hud.fishing.totalEarnedMmk.toLocaleString()} MMK
-                  </strong>
-                </div>
-              </div>
-
-              <button
-                onClick={() => controllerRef.current?.stopFishing()}
-                className="px-2 py-0.5 rounded bg-rose-700 hover:bg-rose-600 border border-rose-300 text-[10px] font-bold text-white cursor-pointer shrink-0"
-              >
-                ✕ ထွက်မည်
-              </button>
-            </div>
-
-            {/* Quick Spot Switcher (Under Balaminhtin Bridge / Sitapu Riverbank / Myitsone) */}
-            <div className="grid grid-cols-3 gap-1 mb-1.5">
-              {[
-                { id: 'spot_balaminhtin', label: '🌊 ကမ်းနားလမ်း မြောက် (1.5x)' },
-                { id: 'spot_sitapu_jetty', label: '🛕 စေတီ ကမ်းနား' },
-                { id: 'spot_myitsone', label: '🌊 ကမ်းနားလမ်း တောင် (1.8x)' },
-              ].map((sp) => (
-                <button
-                  key={sp.id}
-                  onClick={() => controllerRef.current?.startFishingAtSpot(sp.id)}
-                  className={`px-1.5 py-1 rounded text-[9px] font-bold truncate border cursor-pointer ${
-                    hud.fishing.spotNameMm.includes(
-                      sp.id === 'spot_balaminhtin'
-                        ? 'ကမ်းနားလမ်း မြောက်'
-                        : sp.id === 'spot_sitapu_jetty'
-                          ? 'ဆုတောင်းပြည့်စေတီ'
-                          : 'ကမ်းနားလမ်း တောင်',
-                    )
-                      ? 'bg-sky-600 border-white text-white'
-                      : 'bg-slate-900/90 border-white/15 text-slate-300 hover:text-white'
-                  }`}
-                >
-                  {sp.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Fishing Gear Status & Upgrade Bar (Lv.0 -> Lv.1 Budget 30k -> Lv.2 75k -> Lv.3 160k) */}
-            <div className="rounded-lg bg-slate-900/95 border border-amber-400/45 p-1.5 mb-1.5 flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <div className="text-[10px] font-bold text-amber-300 truncate">
-                  🛠️ လက်ရှိကိရိယာ (Lv.{hud.fishing.rodLevel}): {hud.fishing.rodNameMm}
-                </div>
-                <div className="text-[9px] text-slate-300 truncate">
-                  {hud.fishing.rodCapabilityMm}
-                </div>
-              </div>
-
-              {hud.fishing.nextUpgradeCostMmk !== null && (
-                <button
-                  onClick={() => controllerRef.current?.buyOrUpgradeFishingGear()}
-                  className={`shrink-0 px-2 py-1 rounded text-[10px] font-extrabold border cursor-pointer whitespace-nowrap shadow ${
-                    hud.jadeCount >= hud.fishing.nextUpgradeCostMmk
-                      ? 'bg-amber-400 hover:bg-amber-300 border-white text-slate-950 animate-pulse'
-                      : 'bg-slate-800 border-white/20 text-slate-400'
-                  }`}
-                >
-                  {hud.fishing.rodLevel === 0
-                    ? `🛒 ဝါးငါးမျှားတံဝယ်မည် (${hud.fishing.nextUpgradeCostMmk.toLocaleString()} MMK)`
-                    : `⬆️ Lv.${hud.fishing.rodLevel + 1} မြှင့်မည် (${hud.fishing.nextUpgradeCostMmk.toLocaleString()} MMK)`}
-                </button>
-              )}
-            </div>
-
-            {/* Caught Fish Basket & Fish Shop Selling Bar (ဧရာဝတီ ငါးအဝယ်ဒိုင်) */}
-            <div className="rounded-lg bg-emerald-950/75 border border-emerald-400/50 p-1.5 mb-1.5 flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <div className="text-[10px] font-bold text-emerald-300 truncate">
-                  🐟 ငါးပလိုင်း: {hud.fishing.fishBasket.length} ကောင် · တန်ဖိုး{' '}
-                  <span className="text-amber-300 font-mono-tabular">
-                    {hud.fishing.basketValueMmk.toLocaleString()} MMK
-                  </span>
-                </div>
-                <div className="text-[9px] text-slate-300 truncate">
-                  {hud.fishing.lastCatch
-                    ? `နောက်ဆုံးဖမ်းမိ: ${hud.fishing.lastCatch.icon} ${hud.fishing.lastCatch.nameMm} (${hud.fishing.lastCatch.weightKg}kg · ${hud.fishing.lastCatch.priceMmk.toLocaleString()} MMK)`
-                    : 'ဖမ်းမိသောငါးများကို ငါးအဝယ်ဒိုင်သို့ ရောင်းချမှ ကျပ်ငွေ (MMK) ရရှိပါမည်'}
-                </div>
-              </div>
-
-              <button
-                onClick={() => controllerRef.current?.sellCaughtFish()}
-                disabled={hud.fishing.fishBasket.length === 0}
-                className={`shrink-0 px-2.5 py-1 rounded text-[10px] font-extrabold border whitespace-nowrap shadow ${
-                  hud.fishing.fishBasket.length > 0
-                    ? 'bg-emerald-500 hover:bg-emerald-400 border-white text-slate-950 cursor-pointer animate-bounce'
-                    : 'bg-slate-800/80 border-white/15 text-slate-500 cursor-not-allowed'
-                }`}
-              >
-                💰 ငါးဆိုင်သို့ ရောင်းမည် (+{hud.fishing.basketValueMmk.toLocaleString()} MMK)
-              </button>
-            </div>
-
-            {/* Interactive Tension Gauge & Reel Progress (Only shown when player owns gear!) */}
-            {hud.fishing.rodLevel > 0 && (
-              <>
-                <div className="relative h-6 w-full rounded-full bg-slate-950 border border-sky-400/50 overflow-hidden mb-1">
-                  {/* Player Green Catch Bar (Width scales with Rod Level: Lv.1=26%, Lv.2=42%, Lv.3=56%!) */}
-                  <div
-                    className="absolute top-0.5 bottom-0.5 rounded-full bg-emerald-500/45 border-2 border-emerald-300 transition-all duration-75"
-                    style={{
-                      left: `${Math.max(
-                        0,
-                        Math.min(
-                          100 - hud.fishing.barHalfWidth * 2,
-                          hud.fishing.barPosition - hud.fishing.barHalfWidth,
-                        ),
-                      )}%`,
-                      width: `${hud.fishing.barHalfWidth * 2}%`,
-                    }}
-                  />
-
-                  {/* Swimming Fish Icon */}
-                  <div
-                    className="absolute top-0 bottom-0 flex items-center justify-center text-sm transition-all duration-75 select-none pointer-events-none"
-                    style={{ left: `calc(${hud.fishing.fishPosition}% - 10px)` }}
-                  >
-                    {hud.fishing.phase === 'bite' ? '⚡🐟' : '🐟'}
-                  </div>
-                </div>
-
-                {/* Reel-in Progress Bar (0..100%) */}
-                <div className="w-full h-2 rounded-full bg-slate-900 border border-white/15 overflow-hidden mb-1.5">
-                  <div
-                    className="h-full bg-gradient-to-r from-sky-400 via-emerald-400 to-amber-300 transition-all duration-75"
-                    style={{ width: `${hud.fishing.reelProgress}%` }}
-                  />
-                </div>
-              </>
-            )}
-
-            {/* Status Message & Primary Fishing Action Button */}
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-[10px] font-bold text-amber-200 truncate">
-                {hud.fishing.messageMm}
-              </div>
-
-              {hud.fishing.rodLevel === 0 ? (
-                <button
-                  onClick={() => controllerRef.current?.buyOrUpgradeFishingGear()}
-                  className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 border-2 border-white text-slate-950 font-extrabold text-xs cursor-pointer shadow-lg"
-                >
-                  🛒 ဝါးငါးမျှားတံ ဝယ်မည် (30,000 MMK)
-                </button>
-              ) : (
-                <button
-                  onPointerDown={(e) => {
-                    e.stopPropagation();
-                    controllerRef.current?.setFishingReelHeld(true);
-                    controllerRef.current?.fishingActionTap();
-                  }}
-                  onPointerUp={(e) => {
-                    e.stopPropagation();
-                    controllerRef.current?.setFishingReelHeld(false);
-                  }}
-                  onPointerCancel={() => controllerRef.current?.setFishingReelHeld(false)}
-                  className={`shrink-0 px-3.5 py-1.5 rounded-lg border-2 font-extrabold text-xs cursor-pointer touch-none shadow-lg active:scale-95 transition-transform ${
-                    hud.fishing.phase === 'bite'
-                      ? 'bg-amber-400 border-white text-slate-950 animate-bounce'
-                      : hud.fishing.phase === 'reeling'
-                        ? 'bg-emerald-500 border-white text-slate-950'
-                        : 'bg-sky-600 hover:bg-sky-500 border-sky-200 text-white'
-                  }`}
-                >
-                  {hud.fishing.phase === 'waiting'
-                    ? '🌊 စောင့်နေသည်...'
-                    : hud.fishing.phase === 'bite'
-                      ? '⚡ ငါးဆွဲတင်မည်! [SPACE]'
-                      : hud.fishing.phase === 'reeling'
-                        ? '🎣 ဖိထား၍ ဆွဲတင်ပါ! (HOLD)'
-                        : '🎣 ငါးမျှားတံ ပစ်ချမည်'}
-                </button>
-              )}
-            </div>
-          </div>
-        )}
         {hud.notification && (
-          <div className="bg-[#111f24]/95 border border-emerald-500/50 rounded-md px-3 py-1 text-center shadow-lg">
-            <div className="text-[11px] font-bold text-emerald-300 truncate">
+          <div className="bg-black/45 backdrop-blur-sm rounded-full px-3 py-0.5 text-center">
+            <div className="text-[11px] font-semibold text-white/90 truncate">
               {hud.notification.title}
             </div>
             {hud.notification.subtitle && (
-              <div className="text-[10px] text-slate-300 truncate">
+              <div className="text-[10px] text-white/65 truncate">
                 {hud.notification.subtitle}
               </div>
             )}
@@ -1454,9 +1092,9 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
         <div
           onClick={() => setFullMapOpen(true)}
           title="နှိပ်၍ Google Satellite မြေပုံအပြည့်နှင့် နာမည်ကြီးဆိုင်များ ကြည့်ရန်"
-          className={`fixed top-9 right-2.5 z-20 ${
+          className={`fixed top-[56px] right-2.5 z-20 ${
             isCompactLandscape ? 'w-[100px] h-[100px]' : 'w-32 h-32 sm:w-36 sm:h-36'
-          } rounded-xl bg-[#071115]/95 border-2 border-emerald-500/60 overflow-hidden shadow-2xl pointer-events-auto cursor-pointer`}
+          } rounded-2xl bg-[#071115]/90 border-2 border-white/40 overflow-hidden shadow-2xl pointer-events-auto cursor-pointer`}
         >
           {minimapMode === 'satellite' ? (
             <GoogleSatelliteMap
@@ -1557,7 +1195,7 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
                 ))}
 
                 {/* Major Landmarks */}
-                {MYITKYINA_LANDMARKS.map((lm) => (
+                {MYITKYINA_LANDMARKS.filter((lm) => V2_LANDMARK_IDS.includes(lm.id)).map((lm) => (
                   <circle
                     key={lm.id}
                     cx={lm.x}
@@ -1639,8 +1277,12 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
         </div>
       )}
 
+      {touchPadEnabled && isDriving && hud.phase === 'playing' && (
+        <DriveControls vehicle={hud.activeVehicle} ctl={controllerRef.current} />
+      )}
+
       {/* LEFT THUMB ZONE: ULTRA-SMOOTH 360° ANALOG JOYSTICK (ZERO REACT RE-RENDER LAG) */}
-      {touchPadEnabled && (
+      {touchPadEnabled && !isDriving && (
         <div className="fixed bottom-2 left-3 z-20 flex flex-col items-center pointer-events-auto">
           <div
             ref={stickBaseRef}
@@ -1679,7 +1321,7 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
       )}
 
       {/* RIGHT THUMB ZONE: GTA-STYLE CONTEXTUAL ACTION / DRIVING PEDALS */}
-      {touchPadEnabled && (
+      {touchPadEnabled && !isDriving && (
         <div className="fixed bottom-2 right-3 z-20 grid grid-cols-2 gap-1.5 pointer-events-auto">
           {isDriving ? (
             <>
@@ -1693,7 +1335,7 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
                   controllerRef.current?.setVirtualThrottle(0);
                 }}
                 onPointerCancel={() => controllerRef.current?.setVirtualThrottle(0)}
-                className={`${actionBtnClass} rounded-xl bg-emerald-600 active:bg-emerald-500 border border-emerald-300/60 text-white font-bold shadow-lg active:scale-95 transition-transform cursor-pointer touch-none`}
+                className={`${actionBtnClass} rounded-full bg-emerald-500/45 backdrop-blur-md border-2 border-white/45 text-white font-bold shadow-lg active:scale-95 transition-transform cursor-pointer touch-none`}
               >
                 လီဗာ (Gas)
               </button>
@@ -1708,7 +1350,7 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
                   controllerRef.current?.setVirtualThrottle(0);
                 }}
                 onPointerCancel={() => controllerRef.current?.setVirtualThrottle(0)}
-                className={`${actionBtnClass} rounded-xl bg-amber-600 active:bg-amber-500 border border-amber-300/60 text-white font-bold shadow-lg active:scale-95 transition-transform cursor-pointer touch-none`}
+                className={`${actionBtnClass} rounded-full bg-amber-500/45 backdrop-blur-md border-2 border-white/45 text-white font-bold shadow-lg active:scale-95 transition-transform cursor-pointer touch-none`}
               >
                 နောက်ဆုတ်
               </button>
@@ -1723,17 +1365,34 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
                   controllerRef.current?.setVirtualJumpBrake(false);
                 }}
                 onPointerCancel={() => controllerRef.current?.setVirtualJumpBrake(false)}
-                className={`${actionBtnClass} rounded-xl bg-rose-600 active:bg-rose-500 border border-rose-300/60 text-white font-bold shadow-lg active:scale-95 transition-transform cursor-pointer touch-none`}
+                className={`${actionBtnClass} rounded-xl ${hud.activeVehicle === 'skyev' ? 'bg-cyan-600 active:bg-cyan-500 border-cyan-200/70' : 'bg-rose-600 active:bg-rose-500 border-rose-300/60'} border text-white font-bold shadow-lg active:scale-95 transition-transform cursor-pointer touch-none`}
               >
-                ဘရိတ်အုပ်
+                {hud.activeVehicle === 'skyev' ? '⬆ ပျံ [Space]' : 'ဘရိတ်အုပ်'}
               </button>
+
+              {hud.activeVehicle === 'skyev' && (
+                <button
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    controllerRef.current?.setVirtualDescend(true);
+                  }}
+                  onPointerUp={(e) => {
+                    e.stopPropagation();
+                    controllerRef.current?.setVirtualDescend(false);
+                  }}
+                  onPointerCancel={() => controllerRef.current?.setVirtualDescend(false)}
+                  className={`${actionBtnClass} rounded-full bg-indigo-500/45 backdrop-blur-md border-2 border-white/45 text-white font-bold shadow-lg active:scale-95 transition-transform cursor-pointer touch-none`}
+                >
+                  ⬇ ဆင်း [Q]
+                </button>
+              )}
 
               <button
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   controllerRef.current?.toggleEnterExitVehicle();
                 }}
-                className={`${actionBtnClass} rounded-xl bg-slate-800 active:bg-slate-700 border border-white/30 text-slate-100 font-bold shadow-lg active:scale-95 transition-transform cursor-pointer touch-none`}
+                className={`${actionBtnClass} rounded-full bg-slate-500/45 backdrop-blur-md border-2 border-white/45 text-slate-100 font-bold shadow-lg active:scale-95 transition-transform cursor-pointer touch-none`}
               >
                 ယာဉ်ဆင်း [F]
               </button>
@@ -1743,41 +1402,17 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
               <button
                 onPointerDown={(e) => {
                   e.stopPropagation();
-                  if (hud.fishing.active) {
-                    controllerRef.current?.setFishingReelHeld(true);
-                    controllerRef.current?.fishingActionTap();
-                  } else {
-                    controllerRef.current?.triggerActionAttack();
-                  }
+                  controllerRef.current?.triggerActionAttack();
                 }}
-                onPointerUp={(e) => {
-                  e.stopPropagation();
-                  if (hud.fishing.active) {
-                    controllerRef.current?.setFishingReelHeld(false);
-                  }
-                }}
-                onPointerCancel={() => {
-                  if (hud.fishing.active) {
-                    controllerRef.current?.setFishingReelHeld(false);
-                  }
-                }}
-                className={`${actionBtnClass} rounded-xl bg-amber-600 active:bg-amber-500 border border-amber-300/60 text-white font-bold shadow-lg active:scale-95 transition-transform cursor-pointer touch-none`}
+                className={`${actionBtnClass} rounded-full bg-amber-500/45 backdrop-blur-md border-2 border-white/45 text-white font-bold shadow-lg active:scale-95 transition-transform cursor-pointer touch-none`}
               >
-                {hud.fishing.active
-                  ? hud.fishing.rodLevel === 0
-                    ? '🛒 ငါးမျှားတံဝယ်'
-                    : hud.fishing.phase === 'reeling'
-                      ? '🎣 ဖိဆွဲပါ'
-                      : '🎣 ငါးမျှား'
-                  : hud.isManauDancing
-                    ? '💃 အကရပ်မည်'
-                    : hud.nearInteractable?.id === 'manau_dance'
-                      ? '💃 မနောကမည်'
-                      : hud.nearInteractable?.id === 'pagoda_pray'
-                        ? '🙏 ဘုရားရှိခိုး'
-                        : hud.nearInteractable
-                          ? 'ဝင်မည် [E]'
-                          : 'ဓားခုတ်/တီး'}
+                {hud.activity.prompt && !hud.activity.active
+                  ? `▶ ${hud.activity.prompt.icon} စတင်`
+                  : hud.nearInteractable?.id === 'pagoda_pray'
+                  ? '🙏 ဆုတောင်း'
+                  : hud.nearInteractable
+                    ? 'ဝင်မည် [E]'
+                    : 'စကားပြော [E]'}
               </button>
 
               <button
@@ -1790,7 +1425,7 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
                   controllerRef.current?.setVirtualJumpBrake(false);
                 }}
                 onPointerCancel={() => controllerRef.current?.setVirtualJumpBrake(false)}
-                className={`${actionBtnClass} rounded-xl bg-sky-600 active:bg-sky-500 border border-sky-300/60 text-white font-bold shadow-lg active:scale-95 transition-transform cursor-pointer touch-none`}
+                className={`${actionBtnClass} rounded-full bg-sky-500/45 backdrop-blur-md border-2 border-white/45 text-white font-bold shadow-lg active:scale-95 transition-transform cursor-pointer touch-none`}
               >
                 ခုန်ရန်
               </button>
@@ -1800,7 +1435,7 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
                   e.stopPropagation();
                   controllerRef.current?.toggleEnterExitVehicle();
                 }}
-                className={`${actionBtnClass} rounded-xl bg-emerald-700 active:bg-emerald-600 border border-emerald-400/60 text-white font-bold shadow-lg active:scale-95 transition-transform cursor-pointer touch-none`}
+                className={`${actionBtnClass} rounded-full bg-emerald-500/45 backdrop-blur-md border-2 border-white/45 text-white font-bold shadow-lg active:scale-95 transition-transform cursor-pointer touch-none`}
               >
                 ဆိုင်ကယ်/ကား [F]
               </button>
@@ -1814,7 +1449,7 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
                     return next;
                   });
                 }}
-                className={`${actionBtnClass} rounded-xl border font-bold shadow-lg active:scale-95 transition-transform cursor-pointer touch-none ${
+                className={`${actionBtnClass} rounded-full border-2 backdrop-blur-md font-bold shadow-lg active:scale-95 transition-transform cursor-pointer touch-none ${
                   sprintLocked
                     ? 'bg-rose-600 border-rose-300 text-white'
                     : 'bg-slate-800/95 border-white/25 text-slate-200'
@@ -1834,34 +1469,14 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
             <div className="flex items-center justify-between gap-1.5 border-b border-white/10 pb-1.5 mb-2 overflow-x-auto">
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => setActiveDockTab('minigames')}
+                  onClick={() => setActiveDockTab('explore')}
                   className={`px-2.5 py-1 text-[11px] font-bold rounded cursor-pointer whitespace-nowrap ${
-                    activeDockTab === 'minigames'
-                      ? 'bg-sky-600 text-white'
-                      : 'text-sky-300 hover:text-white'
-                  }`}
-                >
-                  🎮 အလုပ် & ငါးဆိုင် (Earn MMK)
-                </button>
-                <button
-                  onClick={() => setActiveDockTab('osm3d')}
-                  className={`px-2.5 py-1 text-[11px] font-bold rounded cursor-pointer whitespace-nowrap ${
-                    activeDockTab === 'osm3d'
+                    activeDockTab === 'explore'
                       ? 'bg-emerald-600 text-white'
                       : 'text-emerald-300 hover:text-white'
                   }`}
                 >
-                  🏙️ OSM 3D မြေပုံ ({hud.osm3d.buildingsCount + hud.osm3d.roadsCount})
-                </button>
-                <button
-                  onClick={() => setActiveDockTab('shops')}
-                  className={`px-2.5 py-1 text-[11px] font-semibold rounded cursor-pointer whitespace-nowrap ${
-                    activeDockTab === 'shops'
-                      ? 'bg-amber-600 text-white'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  နာမည်ကြီးဆိုင်များ (၁၁)
+                  🌿 လည်ပတ်ရန်
                 </button>
                 <button
                   onClick={() => setActiveDockTab('landmarks')}
@@ -1902,8 +1517,11 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
               </button>
             </div>
 
-            {activeDockTab === 'minigames' && (
-              <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-1">
+            {activeDockTab === 'explore' && (
+              <div className="space-y-2 max-h-[34vh] overflow-y-auto pr-1">
+                <div className="text-[11px] font-bold text-amber-200">🎮 လုပ်ဆောင်ချက်နဲ့ Mini-game များ</div>
+                <ActivityList activity={hud.activity} ctl={controllerRef.current} onPick={() => setDrawerOpen(false)} />
+                <div className="text-[11px] font-bold text-sky-200 pt-1">🌅 အေးအေးဆေးဆေး ခရီးစဉ်များ</div>
                 {/* Relax: untimed scenic routes */}
                 <div className="grid grid-cols-2 gap-1.5">
                   <button
@@ -1927,351 +1545,6 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
                     <div className="text-[10px] text-sky-100/80">မြူနှင်းထဲ မနောကွင်းပတ်လည် · ~1 km</div>
                   </button>
                 </div>
-
-                {/* Fishing Gear & Fish Shop Quick Actions */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                  <div className="p-2 rounded-lg bg-slate-900 border border-amber-400/50 flex flex-col justify-between gap-1.5">
-                    <div>
-                      <div className="text-[11px] font-bold text-amber-300">
-                        🛠️ ငါးမျှားကိရိယာ ဆိုင် (Lv.{hud.fishing.rodLevel}/3)
-                      </div>
-                      <div className="text-[10px] text-slate-300">{hud.fishing.rodNameMm}</div>
-                      <div className="text-[9px] text-slate-400">{hud.fishing.rodCapabilityMm}</div>
-                    </div>
-                    {hud.fishing.nextUpgradeCostMmk !== null ? (
-                      <button
-                        onClick={() => controllerRef.current?.buyOrUpgradeFishingGear()}
-                        className="w-full py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-[10px] cursor-pointer"
-                      >
-                        {hud.fishing.rodLevel === 0
-                          ? `🛒 အခြေခံ ဝါးငါးမျှားတံ ဝယ်မည် (${hud.fishing.nextUpgradeCostMmk.toLocaleString()} MMK)`
-                          : `⬆️ Lv.${hud.fishing.rodLevel + 1} အဆင့်မြှင့်မည် (${hud.fishing.nextUpgradeCostMmk.toLocaleString()} MMK)`}
-                      </button>
-                    ) : (
-                      <div className="text-[10px] font-bold text-emerald-400">
-                        ✓ အမြင့်ဆုံး ပရို ငါးမျှားစက် (Lv.3 · 2.5x ဝင်ငွေ)
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="p-2 rounded-lg bg-slate-900 border border-emerald-400/50 flex flex-col justify-between gap-1.5">
-                    <div>
-                      <div className="text-[11px] font-bold text-emerald-300">
-                        🐟 ဧရာဝတီ ငါးအဝယ်ဒိုင် (Fish Shop)
-                      </div>
-                      <div className="text-[10px] text-slate-200">
-                        ပလိုင်းထဲရှိ ငါး: <strong>{hud.fishing.fishBasket.length}</strong> ကောင် ({hud.fishing.basketValueMmk.toLocaleString()} MMK)
-                      </div>
-                      <div className="text-[9px] text-slate-400">
-                        ရောင်းပြီးစုစုပေါင်း: {hud.fishing.totalSoldCount} ကောင် · {hud.fishing.totalEarnedMmk.toLocaleString()} MMK
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => controllerRef.current?.sellCaughtFish()}
-                      disabled={hud.fishing.fishBasket.length === 0}
-                      className={`w-full py-1 rounded font-extrabold text-[10px] ${
-                        hud.fishing.fishBasket.length > 0
-                          ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 cursor-pointer'
-                          : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                      }`}
-                    >
-                      💰 ဖမ်းမိသောငါးများ ရောင်းမည် (+{hud.fishing.basketValueMmk.toLocaleString()} MMK)
-                    </button>
-                  </div>
-                </div>
-
-                {/* Jobs & Mini-Games Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                  <button
-                    onClick={() => {
-                      controllerRef.current?.startFishingAtSpot('spot_balaminhtin');
-                      setDrawerOpen(false);
-                    }}
-                    className="p-2 rounded-lg bg-sky-950/90 hover:bg-sky-900 border border-sky-400/60 text-left cursor-pointer"
-                  >
-                    <div className="text-[11px] font-bold text-sky-300">
-                      🌊 ကမ်းနားလမ်း မြောက် ငါးမျှား
-                    </div>
-                    <div className="text-[9px] text-amber-300">ငါးတန်ကြီးများ (1.4x ဈေးပိုရ)</div>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      controllerRef.current?.startFishingAtSpot('spot_sitapu_jetty');
-                      setDrawerOpen(false);
-                    }}
-                    className="p-2 rounded-lg bg-sky-950/90 hover:bg-sky-900 border border-sky-400/60 text-left cursor-pointer"
-                  >
-                    <div className="text-[11px] font-bold text-sky-300">
-                      🛕 စေတီ ကမ်းနား ငါးမျှား
-                    </div>
-                    <div className="text-[9px] text-emerald-300">ငါးအဝယ်ဒိုင် အနီးဆုံးစခန်း</div>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      controllerRef.current?.startFishingAtSpot('spot_myitsone');
-                      setDrawerOpen(false);
-                    }}
-                    className="p-2 rounded-lg bg-sky-950/90 hover:bg-sky-900 border border-sky-400/60 text-left cursor-pointer"
-                  >
-                    <div className="text-[11px] font-bold text-sky-300">
-                      🌊 ကမ်းနားလမ်း တောင် ငါးမျှား
-                    </div>
-                    <div className="text-[9px] text-amber-300">ရှားပါးငါးကြီးများ (1.6x ဈေးပိုရ)</div>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      controllerRef.current?.startFoodDelivery();
-                      setDrawerOpen(false);
-                    }}
-                    className="p-2 rounded-lg bg-rose-950/90 hover:bg-rose-900 border border-rose-400/60 text-left cursor-pointer"
-                  >
-                    <div className="text-[11px] font-bold text-rose-200">
-                      🛵 ကချင်ထမင်းဟင်း ပို့ဆောင်ရေး
-                    </div>
-                    <div className="text-[9px] text-amber-300">ဝင်ငွေ +35,000 MMK</div>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      controllerRef.current?.startStreetTimeTrial();
-                      setDrawerOpen(false);
-                    }}
-                    className="p-2 rounded-lg bg-indigo-950/90 hover:bg-indigo-900 border border-indigo-400/60 text-left cursor-pointer"
-                  >
-                    <div className="text-[11px] font-bold text-indigo-200">
-                      🏁 စီတာပူ ဆိုင်ကယ်ပြိုင်ပွဲ
-                    </div>
-                    <div className="text-[9px] text-amber-300">ဝင်ငွေ +45,000 MMK</div>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      controllerRef.current?.toggleManauDance();
-                      setDrawerOpen(false);
-                    }}
-                    className="p-2 rounded-lg bg-amber-950/90 hover:bg-amber-900 border border-amber-400/60 text-left cursor-pointer"
-                  >
-                    <div className="text-[11px] font-bold text-amber-200">
-                      💃 မနောအက သံစဉ်မစ်ရှင်
-                    </div>
-                    <div className="text-[9px] text-emerald-300">တစ်ချက် +2,500 MMK / မစ်ရှင် +35k</div>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {activeDockTab === 'osm3d' && (
-              <div className="space-y-2 max-h-[32vh] overflow-y-auto pr-1">
-                <div className="p-2 rounded-lg bg-slate-900 border border-emerald-400/50 flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <div className="text-[11px] font-bold text-emerald-300">
-                      🏙️ {hud.osm3d.sourceName} — 3D ပြောင်းလဲပြီး!
-                    </div>
-                    <div className="text-[10px] text-slate-200">
-                      3D အဆောက်အအုံ: <strong>{hud.osm3d.buildingsCount.toLocaleString()}</strong> လုံး · 3D လမ်းမနှင့် လမ်းသွယ်: <strong>{hud.osm3d.roadsCount.toLocaleString()}</strong> သွယ် · အနီး 150m ရှိ အဆောက်အအုံ: <strong className="text-amber-300">{hud.osm3d.nearbyBuildings150m}</strong> လုံး
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1">
-                    <button
-                      onClick={() => {
-                        controllerRef.current?.teleportToOsmCity();
-                        setDrawerOpen(false);
-                      }}
-                      className="px-2.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-[10px] font-extrabold cursor-pointer"
-                    >
-                      🏙️ မြို့လယ်သို့သွားမည်
-                    </button>
-                    <button
-                      onClick={() => controllerRef.current?.toggleOverheadCamera()}
-                      className={`px-2 py-1 rounded text-[10px] font-bold cursor-pointer ${
-                        hud.cameraMode === 'overhead'
-                          ? 'bg-amber-400 text-slate-950'
-                          : 'bg-slate-800 text-amber-300 border border-amber-400/40'
-                      }`}
-                    >
-                      🛰️ အပေါ်စီးကင်မရာ
-                    </button>
-                    <button
-                      onClick={() => controllerRef.current?.toggleOsmDebugMode()}
-                      className={`px-2 py-1 rounded text-[10px] font-bold cursor-pointer ${
-                        hud.osm3d.debugMode
-                          ? 'bg-cyan-400 text-slate-950'
-                          : 'bg-slate-800 text-cyan-300 border border-cyan-400/40'
-                      }`}
-                    >
-                      🔍 Debug Box
-                    </button>
-                    <button
-                      onClick={() => controllerRef.current?.toggleOsm3DLayer()}
-                      className={`px-2 py-1 rounded text-[10px] font-bold cursor-pointer ${
-                        hud.osm3d.visible
-                          ? 'bg-emerald-700 text-white'
-                          : 'bg-slate-800 text-slate-300'
-                      }`}
-                    >
-                      {hud.osm3d.visible ? '✓ 3D ON' : '3D OFF'}
-                    </button>
-                    <button
-                      onClick={() => customOsmInputRef.current?.click()}
-                      className="px-2 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-extrabold cursor-pointer"
-                    >
-                      📂 .geojson တင်ရန်
-                    </button>
-                  </div>
-                </div>
-
-                {/* Collision-Safe Drivable OSM City Clusters */}
-                <div className="text-[10px] font-bold text-amber-300">
-                  🛣️ OSM 3D အဆောက်အအုံ အထူထပ်ဆုံး မြို့လယ်လမ်းမကြီးများ (Collision-Safe City Road Spawns):
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                  {hud.osm3d.citySpawnPoints.map((sp, idx) => (
-                    <div
-                      key={sp.id}
-                      className="p-2 rounded bg-slate-950 border border-emerald-400/40 flex items-center justify-between gap-2"
-                    >
-                      <div className="min-w-0">
-                        <div className="text-[11px] font-bold text-emerald-300 truncate">
-                          {sp.nameMm}
-                        </div>
-                        <div className="text-[9px] text-slate-300 truncate">
-                          {sp.nameEn} · 150m အတွင်း အဆောက်အအုံ ({sp.buildingsNearby}) လုံး
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          controllerRef.current?.teleportToOsmCity(idx);
-                          setDrawerOpen(false);
-                        }}
-                        className="shrink-0 px-2.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-[10px] cursor-pointer"
-                      >
-                        🏙️ သွားမည်
-                      </button>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Interactive Myitkyina NPCs Directory */}
-                <div className="text-[10px] font-bold text-cyan-300 pt-1">
-                  👥 မြစ်ကြီးနား NPC ဇာတ်ကောင်များ (Shopkeepers, Quest Givers & Citizens):
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                  {MYITKYINA_INTERACTIVE_NPCS.map((npc) => (
-                    <div
-                      key={npc.id}
-                      className="p-1.5 rounded bg-slate-900 border border-amber-400/30 flex flex-col justify-between gap-1"
-                    >
-                      <div>
-                        <div className="text-[10px] font-bold text-amber-300 truncate">
-                          {npc.nameMm}
-                        </div>
-                        <div className="text-[9px] text-slate-300 truncate">{npc.roleLabelMm}</div>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => {
-                            controllerRef.current?.interactWithNpc(npc.id);
-                            setDrawerOpen(false);
-                          }}
-                          className="flex-1 px-1.5 py-0.5 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 text-[9px] font-extrabold cursor-pointer"
-                        >
-                          💬 စကားပြော
-                        </button>
-                        <button
-                          onClick={() => {
-                            controllerRef.current?.teleportToRegion(npc.x, npc.z + 4, npc.nameMm);
-                            setDrawerOpen(false);
-                          }}
-                          className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-white text-[9px] cursor-pointer"
-                        >
-                          သွားမည်
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="text-[10px] font-bold text-emerald-300 pt-1">
-                  📍 OpenStreetMap အထင်ကရ နေရာများ ({hud.osm3d.namedPlaces.length}):
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                  {hud.osm3d.namedPlaces.map((pl) => (
-                    <div
-                      key={pl.id}
-                      className="p-1.5 rounded bg-slate-900/95 border border-white/10 flex flex-col justify-between gap-1"
-                    >
-                      <div>
-                        <div className="text-[11px] font-bold text-emerald-300 truncate">
-                          {pl.nameMm}
-                        </div>
-                        <div className="text-[9px] text-slate-400 truncate">
-                          {pl.category} · {pl.lat}°N, {pl.lng}°E
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => {
-                            controllerRef.current?.setWaypoint(pl.x, pl.z, pl.nameMm);
-                            setDrawerOpen(false);
-                          }}
-                          className="flex-1 px-1.5 py-0.5 rounded bg-emerald-700 hover:bg-emerald-600 text-[10px] font-semibold text-white cursor-pointer"
-                        >
-                          GPS မှတ်မည်
-                        </button>
-                        <button
-                          onClick={() => {
-                            controllerRef.current?.teleportToRegion(pl.x, pl.z + 8, pl.nameMm);
-                            setDrawerOpen(false);
-                          }}
-                          className="px-1.5 py-0.5 rounded bg-amber-600 hover:bg-amber-500 text-[10px] font-bold text-white cursor-pointer"
-                        >
-                          3D သို့သွားမည်
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {activeDockTab === 'shops' && (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-[28vh] overflow-y-auto pr-1">
-                {MYITKYINA_FAMOUS_BUILDINGS.map((b) => (
-                  <div
-                    key={b.id}
-                    className="p-1.5 rounded bg-slate-900/95 border border-white/10 flex flex-col justify-between gap-1"
-                  >
-                    <div>
-                      <div className="text-[11px] font-bold text-amber-300 truncate">
-                        {b.nameMm}
-                      </div>
-                      <div className="text-[9px] text-slate-400 truncate">{b.quarterMm}</div>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => {
-                          controllerRef.current?.setWaypoint(b.x, b.z, b.nameMm);
-                          setDrawerOpen(false);
-                        }}
-                        className="flex-1 px-1.5 py-0.5 rounded bg-emerald-700 hover:bg-emerald-600 text-[10px] font-semibold text-white cursor-pointer"
-                      >
-                        GPS မှတ်မည်
-                      </button>
-                      <button
-                        onClick={() => {
-                          controllerRef.current?.teleportToRegion(b.x, b.z + 10, b.nameMm);
-                          setDrawerOpen(false);
-                        }}
-                        className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200 cursor-pointer"
-                      >
-                        သွားမည်
-                      </button>
-                    </div>
-                  </div>
-                ))}
               </div>
             )}
 
@@ -2296,7 +1569,16 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
             )}
 
             {activeDockTab === 'vehicles' && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+                <button
+                  onClick={() => {
+                    controllerRef.current?.summonVehicle('skyev');
+                    setDrawerOpen(false);
+                  }}
+                  className="px-2.5 py-2 rounded bg-gradient-to-br from-cyan-400/30 to-rose-500/25 border border-cyan-300 text-[11px] font-bold text-cyan-100 cursor-pointer"
+                >
+                  ✈ ကချင်မိုးပျံ EV
+                </button>
                 <button
                   onClick={() => {
                     controllerRef.current?.summonVehicle('ebike');
@@ -2338,28 +1620,6 @@ export const GameHUD: React.FC<Props> = ({ hud, controllerRef }) => {
 
             {activeDockTab === 'world' && (
               <div className="space-y-2">
-                {/* Special Missions: Food Delivery & Street Time Trial */}
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    onClick={() => {
-                      controllerRef.current?.startFoodDelivery();
-                      setDrawerOpen(false);
-                    }}
-                    className="px-2.5 py-1.5 rounded bg-rose-600 hover:bg-rose-500 border border-rose-300 text-[11px] font-bold text-white cursor-pointer"
-                  >
-                    ကချင်ထမင်းဟင်း ပို့ဆောင်ရေး (+35,000 MMK)
-                  </button>
-                  <button
-                    onClick={() => {
-                      controllerRef.current?.startStreetTimeTrial();
-                      setDrawerOpen(false);
-                    }}
-                    className="px-2.5 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 border border-emerald-300 text-[11px] font-bold text-white cursor-pointer"
-                  >
-                    စီတာပူ မြစ်ကမ်းဘေး ဆိုင်ကယ်ပြိုင်ပွဲ (+45,000 MMK)
-                  </button>
-                </div>
-
                 <div className="flex flex-wrap items-center justify-between gap-1.5">
                   {/* Time of Day */}
                   <div className="flex items-center gap-1">

@@ -1,3 +1,4 @@
+import { AUNG_MYIN_THAR } from '../world/aungMyinThar';
 import {
   MAP_ORIGIN,
   METERS_PER_DEG_LAT,
@@ -18,7 +19,7 @@ export type WeatherMode = 'clear' | 'mist' | 'rain';
 
 export type CameraMode = 'chase' | 'high' | 'cinematic' | 'overhead';
 
-export type VehicleType = 'none' | 'ebike' | 'hilux4x4' | 'tuktuk' | 'riverboat';
+export type VehicleType = 'none' | 'ebike' | 'hilux4x4' | 'tuktuk' | 'riverboat' | 'skyev';
 
 export type RegionId =
   | 'manau_park'
@@ -26,7 +27,8 @@ export type RegionId =
   | 'railway_station'
   | 'pagoda_riverfront'
   | 'strand_road'
-  | 'kachin_baptist';
+  | 'kachin_baptist'
+  | 'aung_myin_thar';
 
 export interface LandmarkInfo {
   id: RegionId;
@@ -231,6 +233,8 @@ export interface HUDState {
   nearVehicle: { id: string; type: VehicleType; label: string; dist: number } | null;
   nearInteractable: { id: string; labelMm: string; labelEn: string } | null;
   speedKmh: number;
+  /** Kachin Sky EV height above ground (m); 0 otherwise */
+  altitudeM: number;
   playerX: number;
   playerZ: number;
   playerHeading: number;
@@ -248,6 +252,22 @@ export interface HUDState {
   cameraMode: CameraMode;
   isMuted: boolean;
   notification: { title: string; subtitle: string; timestamp: number } | null;
+  /** Activities & mini-games at the landmarks */
+  activity: import('../activities/activities').ActivityHud;
+  /** Travel journal: landmark stamps and the fact card shown on a first visit */
+  journal: {
+    stamps: { id: string; nameMm: string; nameEn: string; icon: string; ink: string; factsMm: string[]; found: boolean; aerial: boolean }[];
+    card: {
+      placeId: string;
+      nameMm: string;
+      nameEn: string;
+      icon: string;
+      ink: string;
+      factsMm: string[];
+      found: number;
+      total: number;
+    } | null;
+  };
   minimapEntities: MinimapEntity[];
   comboCount: number;
   isManauDancing: boolean;
@@ -427,6 +447,8 @@ export const MAP_PLACES = {
   kachinBaptist: latLngToWorld(25.4001, 97.40655),
   /** Kachin State Cultural Museum (Google Maps) */
   culturalMuseum: latLngToWorld(25.39305, 97.40191),
+  /** Sutaungpyae Pagoda: center of the golden stupa (Google satellite) */
+  sutaungpyae: latLngToWorld(25.39712, 97.40533),
   /** City center (25.3833°N, 97.3964°E) — Myoma market area */
   downtown: latLngToWorld(25.3833, 97.3964),
   // Riverside places are spaced along the play area's north–south extent so they always
@@ -832,6 +854,16 @@ function makeLandmarkAt(
 
 export const MYITKYINA_LANDMARKS: LandmarkInfo[] = [
   makeLandmarkAt(
+    'aung_myin_thar',
+    'အောင်မြင်သာ အပန်းဖြေစခန်း',
+    'Aung Myin Thar Recreation Area',
+    'မြစ်ကြီးနား–မြစ်ဆုံလမ်း (မြို့မှ ~၂၆ ကီလို)',
+    'Clear stream, rapids, bamboo and thatched huts',
+    AUNG_MYIN_THAR,
+    170,
+    '#2F9E8F',
+  ),
+  makeLandmarkAt(
     'manau_park',
     'မနောကွင်း',
     'Kachin Manau Grounds',
@@ -866,8 +898,8 @@ export const MYITKYINA_LANDMARKS: LandmarkInfo[] = [
     'ဆုတောင်းပြည့်စေတီ မြစ်ကမ်းနား',
     'Sutaungpyae Pagoda Riverfront',
     'ဧရာဝတီ ကမ်းနား',
-    'Riverside stupa & boat jetty',
-    MAP_PLACES.pagodaJetty,
+    'Golden stupa near the Ayeyarwady',
+    MAP_PLACES.sutaungpyae,
     90,
     '#FBBF24',
   ),
@@ -1248,30 +1280,17 @@ const LUNG_GA_PA = MYITKYINA_FAMOUS_BUILDINGS.find((b) => b.id === 'bldg_lung_ga
 
 export const INITIAL_QUESTS: QuestObjective[] = [
   {
-    id: 'quest_fishing',
-    titleMm: 'ငါးမျှားတံဝယ်ပြီး ဧရာဝတီကမ်းနားတွင် ငါး (၃) ကောင်ဖမ်း၍ ငါးဆိုင်သွင်းပါ',
-    titleEn: 'Buy Fishing Gear, Catch 3 Fish & Sell at the Fish Shop',
+    id: 'quest_explorer',
+    titleMm: 'မြစ်ကြီးနားကို လှည့်လည်ကြည့်ရှု — အထင်ကရနေရာ (၃) ခု',
+    titleEn: 'Explore Myitkyina — Visit 3 Landmarks',
     descriptionMm:
-      'အခြေခံ ဝါးငါးမျှားတံ (30,000 MMK) ဝယ်ယူပြီး ဆုတောင်းပြည့်စေတီ ကမ်းနား သို့မဟုတ် ကမ်းနားလမ်း ငါးမျှားဆိပ်တွင် ငါး (၃) ကောင်ဖမ်း၍ ငါးအဝယ်ဒိုင်သို့ ရောင်းချပါ',
-    targetRegion: 'pagoda_riverfront',
-    targetX: MAP_PLACES.pagodaJetty.x,
-    targetZ: MAP_PLACES.pagodaJetty.z,
+      'မီးရထားဘူတာ → မနောကွင်း → ဆုတောင်းပြည့်ဘုရား ကို အေးအေးဆေးဆေး သွားလည်ပါ (အချိန်မကန့်သတ်)',
+    targetRegion: 'railway_station',
+    targetX: 0,
+    targetZ: 0,
     progress: 0,
     goal: 3,
-    rewardJade: 50000,
-    completed: false,
-  },
-  {
-    id: 'quest_delivery',
-    titleMm: 'ဘက်ထရီဆိုင်ကယ်ဖြင့် ကချင်ထမင်းဟင်း (၃) နေရာ ပို့ဆောင်ပါ',
-    titleEn: 'AIMA E-Bike Kachin Food Delivery Job (3 Stops)',
-    descriptionMm: 'လုံဂါပါ ကချင်ရိုးရာဆိုင်မှ အော်ဒါယူပြီး မြို့တွင်း ၃ နေရာသို့ အချိန်မီ လိုက်ပို့၍ ဝင်ငွေရှာပါ',
-    targetRegion: 'manau_park',
-    targetX: LUNG_GA_PA.x,
-    targetZ: LUNG_GA_PA.z,
-    progress: 0,
-    goal: 3,
-    rewardJade: 40000,
+    rewardJade: 55000,
     completed: false,
   },
   {
@@ -1279,40 +1298,13 @@ export const INITIAL_QUESTS: QuestObjective[] = [
     titleMm: 'ဘူတာရုံ ခရီးသည် ပစ္စည်းထမ်း — ရထားခရီးသည်၏ ခရီးဆောင်အိတ်ကို ဟိုတယ်သို့ ပို့ပါ',
     titleEn: 'Station Porter: Carry a Passenger’s Luggage to the Hotel',
     descriptionMm:
-      'မန္တလေးမှ ရထားဆိုက်ပြီ! မြစ်ကြီးနား မီးရထားဘူတာ ရှေ့တွင် ခရီးဆောင်အိတ်ကို ယူပြီး Hotel Myitkyina သို့ အချိန်မီ ပို့ဆောင်ပေးပါ',
+      'မန္တလေးမှ ရထားဆိုက်ပြီ! မြစ်ကြီးနား မီးရထားဘူတာ ရှေ့တွင် ခရီးဆောင်အိတ်ကို ယူပြီး Hotel Myitkyina သို့ ပို့ပေးပါ (အချိန်မကန့်သတ်)',
     targetRegion: 'railway_station',
     targetX: 0,
     targetZ: 0,
     progress: 0,
     goal: 2,
     rewardJade: 40000,
-    completed: false,
-  },
-  {
-    id: 'quest_manau_rhythm',
-    titleMm: 'မနောကွင်းတွင် ရိုးရာမနောအက သံစဉ်ချက် (၈) ချက် မှန်အောင်ကပါ',
-    titleEn: 'Complete the Manau Rhythm Dance Performance (8 Beats)',
-    descriptionMm:
-      'မနောကွင်းအလယ်တွင် မနောအက စတင်ပြီး ကချင်ရိုးရာတေးသံစဉ် စည်းချက်အလိုက် ခလုတ် (◀/▲/▼/▶) တို့ကို အချိန်မီနှိပ်၍ ကခုန်ပါ',
-    targetRegion: 'manau_park',
-    targetX: 0,
-    targetZ: 7,
-    progress: 0,
-    goal: 8,
-    rewardJade: 35000,
-    completed: false,
-  },
-  {
-    id: 'quest_timetrial',
-    titleMm: 'မြို့လယ် ဆိုင်ကယ်/ကား ပြိုင်ပွဲ (ဂိတ် ၆ ခု)',
-    titleEn: 'Downtown Street Time Trial (6 Checkpoints)',
-    descriptionMm: 'မနောကွင်းအဝင်မှ စတင်ပြီး မြို့လယ်လမ်းမကြီးများပေါ်ရှိ ဂိတ် (၆) ခုကို အချိန်မီ ဖြတ်မောင်းပါ',
-    targetRegion: 'manau_park',
-    targetX: 0,
-    targetZ: 60,
-    progress: 0,
-    goal: 6,
-    rewardJade: 45000,
     completed: false,
   },
   {
@@ -1327,46 +1319,6 @@ export const INITIAL_QUESTS: QuestObjective[] = [
     progress: 0,
     goal: 3,
     rewardJade: 30000,
-    completed: false,
-  },
-  {
-    id: 'quest_smugglers',
-    titleMm: 'ကမ်းနားလမ်း တောင်ပိုင်းရှိ မှောင်ခိုဂိုဏ်း (၅) ဦး နှိမ်နင်းပါ',
-    titleEn: 'Defeat 5 Rogue Smugglers (Security Bounty Job)',
-    descriptionMm: 'ကချင်ဓား (Nhtu) သို့မဟုတ် 4x4 ကားဖြင့် မြစ်ကမ်းနား မှောင်ခိုဂိုဏ်းသားများကို တိုက်ခိုက်နှိမ်နင်း၍ ဆုကြေးငွေ ရယူပါ',
-    targetRegion: 'strand_road',
-    targetX: MAP_PLACES.strandSouth.x,
-    targetZ: MAP_PLACES.strandSouth.z + 120,
-    progress: 0,
-    goal: 5,
-    rewardJade: 60000,
-    completed: false,
-  },
-  {
-    id: 'quest_explorer',
-    titleMm: 'မြစ်ကြီးနား မြို့ပတ်ခရီး — နာမည်ကြီးနေရာ (၄) ခု လည်ပတ်ပါ',
-    titleEn: 'Myitkyina City Tour — Visit 4 Famous Landmarks',
-    descriptionMm:
-      'မီးရထားဘူတာ → မြို့မဈေး → ဆုတောင်းပြည့်စေတီ ကမ်းနား → ကချင်ပြည်နယ် ယဉ်ကျေးမှုပြတိုက် အစဉ်လိုက် သွားရောက်လည်ပတ်ပါ (GPS လမ်းညွှန်အတိုင်း)',
-    targetRegion: 'railway_station',
-    targetX: 0,
-    targetZ: 0,
-    progress: 0,
-    goal: 4,
-    rewardJade: 55000,
-    completed: false,
-  },
-  {
-    id: 'quest_rare_fish',
-    titleMm: 'ဧရာဝတီ ရှားပါးငါး (Rare/Legendary) (၂) ကောင် ဖမ်းပါ',
-    titleEn: 'Catch 2 Rare or Legendary Ayeyarwady Fish',
-    descriptionMm: 'ငါးမျှားတံကို Lv.2 သို့ အဆင့်မြှင့်ပြီး ကမ်းနားလမ်း ငါးမျှားဆိပ်တွင် ရှားပါးငါး (၂) ကောင် ဖမ်းယူပါ',
-    targetRegion: 'strand_road',
-    targetX: MAP_PLACES.strandNorth.x,
-    targetZ: MAP_PLACES.strandNorth.z,
-    progress: 0,
-    goal: 2,
-    rewardJade: 70000,
     completed: false,
   },
 ];
@@ -1385,8 +1337,7 @@ export const STATION_QUEST = {
 /** Ordered stops for quest_explorer; progress N means stop N is next. */
 export const CITY_TOUR_STOP_IDS: RegionId[] = [
   'railway_station',
-  'downtown_market',
+  'manau_park',
   'pagoda_riverfront',
-  'kachin_baptist',
 ];
 

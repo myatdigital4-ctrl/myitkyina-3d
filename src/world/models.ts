@@ -38,6 +38,7 @@ import {
   MANAU_RING_OUTER,
 } from './manauPark';
 import { nearestStreetPoint, relocateLegacy, reserveLot } from './worldLayout';
+import { buildSkyEV, buildThreeWheeler } from './myitkyinaVehicles';
 
 // 1. CONTINUOUS 20KM-SCALE SITAPU QUARTER TERRAIN MESH WITH NATURAL ALLUVIAL VERTEX COLORS
 export function createMyitkyinaTerrainMesh(): THREE.Mesh {
@@ -493,102 +494,6 @@ export function createStrandRoadCheckpoints(): {
   return { group, checkpoints };
 }
 
-// 3. SUTAUNGPYAE GOLDEN PAGODA (ဆုတောင်းပြည့်စေတီ — Set in dedicated riverfront plaza at x = 68, z = 224) & RIVERFRONT JETTY
-export function createSutaungpyaePagoda(): THREE.Group {
-  const group = new THREE.Group();
-  // ~70 m inland from the Ayeyarwady's west bank; the jetty (x + 62) reaches the water
-  const px = MAP_PLACES.pagodaJetty.x - 30;
-  const pz = MAP_PLACES.pagodaJetty.z;
-  const py = groundHeightAt(px, pz);
-  group.position.set(px, py, pz);
-
-  const goldLeafMat = new THREE.MeshPhysicalMaterial({
-    color: '#fbbf24',
-    roughness: 0.18,
-    metalness: 0.92,
-    clearcoat: 0.6,
-  });
-  const whiteMarbleMat = new THREE.MeshStandardMaterial({
-    color: '#f8fafc',
-    roughness: 0.6,
-    metalness: 0.08,
-  });
-
-  // Dedicated Marble Courtyard Plaza Pad (26m x 26m, completely clear of all roads)
-  const plazaPad = new THREE.Mesh(
-    new THREE.BoxGeometry(26, 0.22, 26),
-    whiteMarbleMat,
-  );
-  plazaPad.position.y = 0.11;
-  plazaPad.receiveShadow = true;
-  group.add(plazaPad);
-
-  // Octagonal stepped terrace base
-  for (let tier = 0; tier < 3; tier++) {
-    const r = 10.5 - tier * 2.2;
-    const terrace = new THREE.Mesh(
-      new THREE.CylinderGeometry(r * 0.92, r, 1.1, 8),
-      tier === 2 ? goldLeafMat : whiteMarbleMat,
-    );
-    terrace.position.y = 0.55 + tier * 1.1;
-    terrace.castShadow = true;
-    terrace.receiveShadow = true;
-    group.add(terrace);
-  }
-
-  // LatheGeometry Golden Stupa Bell Dome (Anda & Phaung-yit rings)
-  const lathePoints = [
-    new THREE.Vector2(0, 0),
-    new THREE.Vector2(5.2, 0),
-    new THREE.Vector2(4.6, 1.4),
-    new THREE.Vector2(4.0, 3.6),
-    new THREE.Vector2(2.6, 6.5),
-    new THREE.Vector2(1.4, 9.8),
-    new THREE.Vector2(0.55, 13.4),
-    new THREE.Vector2(0.18, 15.6),
-    new THREE.Vector2(0, 16.2),
-  ];
-  const stupaGeo = new THREE.LatheGeometry(lathePoints, 32);
-  const stupaMesh = new THREE.Mesh(stupaGeo, goldLeafMat);
-  stupaMesh.position.y = 3.3;
-  stupaMesh.castShadow = true;
-  group.add(stupaMesh);
-
-  // Sacred Hti Umbrella Crown at top
-  const htiRing = new THREE.Mesh(new THREE.TorusGeometry(0.85, 0.09, 10, 24), goldLeafMat);
-  htiRing.rotation.x = Math.PI / 2;
-  htiRing.position.y = 19.0;
-  group.add(htiRing);
-
-  // 4 Corner Guardian Shrines
-  for (const [sx, sz] of [
-    [7.5, 7.5],
-    [-7.5, 7.5],
-    [7.5, -7.5],
-    [-7.5, -7.5],
-  ]) {
-    const shrine = new THREE.Mesh(new THREE.ConeGeometry(1.3, 3.6, 8), goldLeafMat);
-    shrine.position.set(sx, 2.8, sz);
-    shrine.castShadow = true;
-    group.add(shrine);
-  }
-
-  // Wooden Riverfront Jetty Dock extending East into the Ayeyarwady River
-  const dockGroup = new THREE.Group();
-  dockGroup.position.set(62, -py + 0.5, 0);
-  const deck = new THREE.Mesh(
-    new THREE.BoxGeometry(24, 0.38, 5.4),
-    new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.8 }),
-  );
-  deck.castShadow = true;
-  deck.receiveShadow = true;
-  dockGroup.add(deck);
-  group.add(dockGroup);
-
-  return group;
-}
-
-// 4. MYITKYINA DOWNTOWN MARKET, CLOCK TOWER & RAILWAY STATION (Clock Tower at x = -125, z = 335; Market Wings set back ±20m from road)
 export function createMyitkyinaDowntown(): THREE.Group {
   const group = new THREE.Group();
   const cx = -125;
@@ -841,6 +746,8 @@ export interface HeroRig {
   rightFanMesh: THREE.Mesh;
   fishingRodMesh: THREE.Group;
   swordSlashMesh: THREE.Mesh;
+  /** Motorbike helmet, shown while riding the e-bike */
+  helmetMesh: THREE.Group;
 }
 
 export function createKachinHero(renderer: THREE.WebGLRenderer): HeroRig {
@@ -876,72 +783,177 @@ export function createKachinHero(renderer: THREE.WebGLRenderer): HeroRig {
     side: THREE.DoubleSide,
   });
 
-  // Legs
-  const legGeo = new THREE.CapsuleGeometry(0.16, 0.55, 4, 8);
-  const leftLeg = new THREE.Mesh(legGeo, jacketMat);
-  leftLeg.position.set(-0.2, 0.45, 0);
-  leftLeg.castShadow = true;
-  bodyGroup.add(leftLeg);
+  // ---- V2 character: rounder proportions, limbs that pivot at hips and shoulders ----
+  const trouserMat = new THREE.MeshStandardMaterial({ color: '#1f2733', roughness: 0.8 });
+  const shoeMat = new THREE.MeshStandardMaterial({ color: '#f1f1ee', roughness: 0.6 });
+  const soleMat = new THREE.MeshStandardMaterial({ color: '#c0392b', roughness: 0.7 });
+  const hairMat = new THREE.MeshStandardMaterial({ color: '#15110e', roughness: 0.75 });
+  const eyeMat = new THREE.MeshStandardMaterial({ color: '#111111', roughness: 0.3 });
+  const shirtMat = new THREE.MeshStandardMaterial({ color: '#f4efe4', roughness: 0.7 });
 
-  const rightLeg = new THREE.Mesh(legGeo, jacketMat);
-  rightLeg.position.set(0.2, 0.45, 0);
-  rightLeg.castShadow = true;
-  bodyGroup.add(rightLeg);
+  /** Empty mesh used as a joint: rotating it swings everything below. */
+  const joint = (x: number, y: number, z: number) => {
+    const j = new THREE.Mesh();
+    j.position.set(x, y, z);
+    return j;
+  };
 
-  // Torso (Traditional Kachin Dark Jacket with Silver Stud Trim)
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.92, 0.44), jacketMat);
-  torso.position.y = 1.25;
+  // Legs: hip joint, trouser leg, sneaker
+  const makeLeg = (side: number) => {
+    const hip = joint(side * 0.15, 0.95, 0);
+    const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.135, 0.62, 4, 10), trouserMat);
+    thigh.position.y = -0.44;
+    thigh.castShadow = true;
+    hip.add(thigh);
+    const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.13, 0.36), shoeMat);
+    shoe.position.set(0, -0.89, 0.06);
+    shoe.castShadow = true;
+    hip.add(shoe);
+    const sole = new THREE.Mesh(new THREE.BoxGeometry(0.23, 0.04, 0.37), soleMat);
+    sole.position.set(0, -0.95, 0.06);
+    hip.add(sole);
+    bodyGroup.add(hip);
+    return hip;
+  };
+  const leftLeg = makeLeg(-1);
+  const rightLeg = makeLeg(1);
+
+  // Torso: tapered Kachin jacket over a white shirt, rows of silver studs, red trim
+  const torsoGeo = new THREE.CylinderGeometry(0.36, 0.3, 0.78, 14);
+  torsoGeo.scale(1, 1, 0.68);
+  const torso = new THREE.Mesh(torsoGeo, jacketMat);
+  torso.position.y = 1.33;
   torso.castShadow = true;
   bodyGroup.add(torso);
+  const shirt = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.6, 0.05), shirtMat);
+  shirt.position.set(0, 1.36, 0.235);
+  bodyGroup.add(shirt);
+  for (const sx of [-0.13, 0.13]) {
+    for (let k = 0; k < 5; k++) {
+      const stud = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 6), silverMat);
+      stud.position.set(sx, 1.58 - k * 0.11, 0.235);
+      bodyGroup.add(stud);
+    }
+  }
+  const hem = new THREE.Mesh(new THREE.CylinderGeometry(0.305, 0.305, 0.07, 14), crimsonMat);
+  hem.scale.set(1, 1, 0.68);
+  hem.position.y = 0.97;
+  bodyGroup.add(hem);
+  const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.29, 0.1, 14), trouserMat);
+  belt.scale.set(1, 1, 0.7);
+  belt.position.y = 0.93;
+  bodyGroup.add(belt);
 
-  // Kachin Woven Crossbody Bag (N'hpye)
-  const strap = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.18, 0.48), weaveMat);
-  strap.position.set(0, 1.26, 0);
-  strap.rotation.z = 0.58;
+  // Kachin woven crossbody bag (N'hpye) with tassels
+  const strap = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.95, 0.5), weaveMat);
+  strap.position.set(0, 1.32, 0);
+  strap.rotation.z = 0.62;
   bodyGroup.add(strap);
-
-  const bagPouch = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.38, 0.34), weaveMat);
-  bagPouch.position.set(-0.46, 0.92, 0.08);
+  const bagPouch = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.32, 0.1), weaveMat);
+  bagPouch.position.set(-0.3, 0.98, 0.2);
   bagPouch.castShadow = true;
   bodyGroup.add(bagPouch);
+  for (let k = 0; k < 4; k++) {
+    const tassel = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.012, 0.16, 5), crimsonMat);
+    tassel.position.set(-0.41 + k * 0.07, 0.76, 0.2);
+    bodyGroup.add(tassel);
+  }
 
-  // Head & Traditional Kachin Headband
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.29, 16, 16), skinMat);
-  head.position.y = 2.02;
+  // Neck, head, hair, face
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 0.14, 10), skinMat);
+  neck.position.y = 1.78;
+  bodyGroup.add(neck);
+  const headGeo = new THREE.SphereGeometry(0.25, 20, 16);
+  headGeo.scale(0.95, 1.08, 1);
+  const head = new THREE.Mesh(headGeo, skinMat);
+  head.position.y = 2.04;
   head.castShadow = true;
   bodyGroup.add(head);
-
-  const headband = new THREE.Mesh(new THREE.CylinderGeometry(0.305, 0.305, 0.14, 18), crimsonMat);
-  headband.position.y = 2.1;
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.262, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.52), hairMat);
+  hair.position.y = 2.07;
+  hair.rotation.x = -0.25;
+  bodyGroup.add(hair);
+  for (const sx of [-0.085, 0.085]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.032, 8, 6), eyeMat);
+    eye.position.set(sx, 2.06, 0.225);
+    bodyGroup.add(eye);
+    const brow = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.018, 0.02), hairMat);
+    brow.position.set(sx, 2.13, 0.228);
+    bodyGroup.add(brow);
+  }
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), skinMat);
+  nose.position.set(0, 2.0, 0.25);
+  bodyGroup.add(nose);
+  const smile = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.01, 4, 10, Math.PI), new THREE.MeshStandardMaterial({ color: '#8a3b2e' }));
+  smile.position.set(0, 1.94, 0.232);
+  smile.rotation.z = Math.PI;
+  bodyGroup.add(smile);
+  // Red Kachin headband with the woven pattern and two hanging ends
+  const headband = new THREE.Mesh(new THREE.CylinderGeometry(0.262, 0.262, 0.09, 20, 1, true), weaveMat);
+  headband.position.y = 2.15;
   bodyGroup.add(headband);
+  for (const dz of [0, 0.05]) {
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.02), crimsonMat);
+    tail.position.set(0.12 + dz, 2.02, -0.25);
+    tail.rotation.z = 0.2;
+    bodyGroup.add(tail);
+  }
 
-  // Arms
-  const armGeo = new THREE.CapsuleGeometry(0.13, 0.5, 4, 8);
-  const leftArm = new THREE.Mesh(armGeo, jacketMat);
-  leftArm.position.set(-0.52, 1.28, 0);
-  leftArm.castShadow = true;
-  bodyGroup.add(leftArm);
+  // Arms: shoulder joint, sleeve, hand
+  const makeArm = (side: number) => {
+    const shoulder = joint(side * 0.42, 1.64, 0);
+    const sleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.48, 4, 10), jacketMat);
+    sleeve.position.y = -0.3;
+    sleeve.castShadow = true;
+    shoulder.add(sleeve);
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.105, 0.06, 10), crimsonMat);
+    cuff.position.y = -0.56;
+    shoulder.add(cuff);
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 8), skinMat);
+    hand.position.y = -0.66;
+    shoulder.add(hand);
+    bodyGroup.add(shoulder);
+    return shoulder;
+  };
+  const leftArm = makeArm(-1);
+  const rightArm = makeArm(1);
+  void torso;
 
-  const rightArm = new THREE.Mesh(armGeo, jacketMat);
-  rightArm.position.set(0.52, 1.28, 0);
-  rightArm.castShadow = true;
-  bodyGroup.add(rightArm);
+  // Glossy blue motorbike helmet with a dark visor (riding the e-bike)
+  const helmetMesh = new THREE.Group();
+  const shell = new THREE.Mesh(
+    new THREE.SphereGeometry(0.31, 22, 14, 0, Math.PI * 2, 0, Math.PI * 0.62),
+    new THREE.MeshPhysicalMaterial({ color: '#1f5fbf', roughness: 0.25, metalness: 0.2, clearcoat: 1 }),
+  );
+  shell.position.y = 2.05;
+  helmetMesh.add(shell);
+  const visor = new THREE.Mesh(
+    new THREE.SphereGeometry(0.315, 18, 8, -Math.PI * 0.32, Math.PI * 0.64, Math.PI * 0.32, Math.PI * 0.22),
+    new THREE.MeshStandardMaterial({ color: '#111827', roughness: 0.1, metalness: 0.6 }),
+  );
+  visor.position.y = 2.05;
+  helmetMesh.add(visor);
+  const helmetStripe = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.04, 0.6), new THREE.MeshStandardMaterial({ color: '#f8fafc' }));
+  helmetStripe.position.set(0, 2.35, 0);
+  helmetMesh.add(helmetStripe);
+  helmetMesh.visible = false;
+  bodyGroup.add(helmetMesh);
 
   // Kachin Silver-Hilted Sword (Nhtu) attached to right arm
   const blade = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.95, 0.16), silverMat);
   blade.position.set(0, -0.35, 0.45);
   blade.rotation.x = Math.PI / 2.3;
-  rightArm.add(blade);
+  // V2 (relax & explore): the hero carries no sword. The mesh stays (unattached) for API compatibility.
 
   // Traditional Kachin Manau Ceremonial Fans (မနောယပ်တောင်) attached to left & right hands (visible during Manau Dance!)
   const fanGeo = new THREE.CircleGeometry(0.38, 12, 0, Math.PI);
   const leftFanMesh = new THREE.Mesh(fanGeo, manauFanMat);
-  leftFanMesh.position.set(-0.08, -0.38, 0.22);
+  leftFanMesh.position.set(-0.08, -0.66, 0.22);
   leftFanMesh.visible = false;
   leftArm.add(leftFanMesh);
 
   const rightFanMesh = new THREE.Mesh(fanGeo, manauFanMat);
-  rightFanMesh.position.set(0.08, -0.38, 0.22);
+  rightFanMesh.position.set(0.08, -0.66, 0.22);
   rightFanMesh.visible = false;
   rightArm.add(rightFanMesh);
 
@@ -951,7 +963,7 @@ export function createKachinHero(renderer: THREE.WebGLRenderer): HeroRig {
     new THREE.CylinderGeometry(0.018, 0.045, 2.75, 8),
     new THREE.MeshStandardMaterial({ color: '#d97706', roughness: 0.5 }),
   );
-  rodPole.position.set(0, -0.25, 1.25);
+  rodPole.position.set(0, -0.6, 1.25);
   rodPole.rotation.x = Math.PI / 2.35;
   fishingRodMesh.add(rodPole);
 
@@ -959,7 +971,7 @@ export function createKachinHero(renderer: THREE.WebGLRenderer): HeroRig {
     new THREE.CylinderGeometry(0.008, 0.008, 1.85, 6),
     new THREE.MeshBasicMaterial({ color: '#e2e8f0', transparent: true, opacity: 0.85 }),
   );
-  fishingLine.position.set(0, -0.95, 2.45);
+  fishingLine.position.set(0, -1.3, 2.45);
   fishingRodMesh.add(fishingLine);
   fishingRodMesh.visible = false;
   rightArm.add(fishingRodMesh);
@@ -990,13 +1002,20 @@ export function createKachinHero(renderer: THREE.WebGLRenderer): HeroRig {
     rightFanMesh,
     fishingRodMesh,
     swordSlashMesh,
+    helmetMesh,
   };
 }
 
 // 7. PLAYABLE VEHICLES (AIMA Electric Scooter ဘက်ထရီဆိုင်ကယ်, Off-Road 4x4 Highland Pickup, Myitkyina Tuk-Tuk, Ayeyarwady Longtail Boat)
+export type PlayableVehicleType = 'ebike' | 'hilux4x4' | 'tuktuk' | 'riverboat' | 'skyev';
+
 export interface WorldVehicle {
   id: string;
-  type: 'ebike' | 'hilux4x4' | 'tuktuk' | 'riverboat';
+  type: PlayableVehicleType;
+  /** Kachin Sky EV only: height above the ground (m), climb rate, thruster glow */
+  alt?: number;
+  vAlt?: number;
+  glow?: THREE.MeshBasicMaterial[];
   label: string;
   group: THREE.Group;
   wheels: THREE.Object3D[];
@@ -1008,7 +1027,7 @@ export interface WorldVehicle {
 
 export function createPlayableVehicle(
   id: string,
-  type: 'ebike' | 'hilux4x4' | 'tuktuk' | 'riverboat',
+  type: PlayableVehicleType,
   x: number,
   z: number,
   heading: number,
@@ -1032,6 +1051,8 @@ export function createPlayableVehicle(
     emissive: '#fde047',
     emissiveIntensity: 1.2,
   });
+  const glowMats: THREE.MeshBasicMaterial[] = [];
+  group.rotation.order = 'YXZ';
 
   if (type === 'ebike') {
     // =========================================================================
@@ -1392,44 +1413,16 @@ export function createPlayableVehicle(
       wheels.push(wGroup);
     }
   } else if (type === 'tuktuk') {
-    const bodyMat = new THREE.MeshPhysicalMaterial({
-      color: '#059669',
-      roughness: 0.3,
-      metalness: 0.5,
-      clearcoat: 0.8,
-    });
-    const canopyMat = new THREE.MeshStandardMaterial({ color: '#facc15', roughness: 0.65 });
-
-    const base = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.6, 3.2), bodyMat);
-    base.position.y = 0.65;
-    base.castShadow = true;
-    group.add(base);
-
-    const frontCowl = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.75, 1.2, 12), bodyMat);
-    frontCowl.position.set(0, 1.1, 1.0);
-    frontCowl.castShadow = true;
-    group.add(frontCowl);
-
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.85, 0.18, 2.8), canopyMat);
-    roof.position.set(0, 2.15, -0.1);
-    roof.castShadow = true;
-    group.add(roof);
-
-    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 12), headlightMat);
-    lamp.position.set(0, 1.15, 1.6);
-    group.add(lamp);
-
-    for (const [wx, wz] of [
-      [0, 1.25],
-      [-0.9, -1.05],
-      [0.9, -1.05],
-    ]) {
-      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.38, 0.26, 16), tireMat);
-      w.rotation.z = Math.PI / 2;
-      w.position.set(wx, 0.38, wz);
-      group.add(w);
-      wheels.push(w);
-    }
+    // Myitkyina three-wheel motorcycle truck: red body, green canopy (2026 street photos)
+    const tw = buildThreeWheeler('#c2342b', '#3f8d3c', false);
+    group.add(tw.group);
+    wheels.push(...tw.wheels);
+  } else if (type === 'skyev') {
+    const ev = buildSkyEV();
+    group.rotation.order = 'YXZ';
+    group.add(ev.group);
+    wheels.push(...ev.wheels);
+    glowMats.push(...ev.parts.glow);
   } else {
     // Ayeyarwady Longtail Riverboat (စက်လှေ)
     const hullMat = new THREE.MeshStandardMaterial({ color: '#92400e', roughness: 0.6 });
@@ -1462,10 +1455,13 @@ export function createPlayableVehicle(
         : type === 'hilux4x4'
           ? 'ကချင်တောင်ပေါ် 4x4 ကား (Highland 4x4)'
           : type === 'tuktuk'
-            ? 'မြစ်ကြီးနား သုံးဘီး (Three-Wheeler Tuk-Tuk)'
-            : 'ဧရာဝတီ စက်လှေ (Ayeyarwady Riverboat)',
+            ? 'မြစ်ကြီးနား သုံးဘီး ကုန်တင် (Three-Wheeler)'
+            : type === 'skyev'
+              ? 'ကချင်မိုးပျံ EV (Kachin Sky EV)'
+              : 'ဧရာဝတီ စက်လှေ (Ayeyarwady Riverboat)',
     group,
     wheels,
+    ...(type === 'skyev' ? { alt: 0, vAlt: 0, glow: glowMats } : {}),
     x,
     z,
     heading,
@@ -1636,7 +1632,7 @@ export function createSmugglerEnemies(): SmugglerEnemy[] {
 
 // 10. MINI-3D LAYERED TREES (သစ်ပင်များ) & RIVER ROCKS (THREE.InstancedMesh) ACROSS SPACIOUS SITAPU
 export function createInstancedFoliageAndRocks(scene: THREE.Scene) {
-  const treeCount = 1400;
+  const treeCount = 2400; // leafy like the reference: more shade trees on the open plots
   // Broad tropical canopies (rain trees, mango, tamarind) rather than conifers
   const rain = createRainTreeGeometries();
   const trunkGeo = rain.trunk;
